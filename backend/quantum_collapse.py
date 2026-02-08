@@ -4,7 +4,7 @@ Handles the collapse of entangled cards and associated penalties
 """
 
 import logging
-import random
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class QuantumCollapseManager:
         for idx, card in enumerate(hand):
             if (card.is_entangled and 
                 not card.is_collapsed and
-                card.original_value in [original_value, partner_value]):
+                card.value in [original_value, partner_value]):
                 return idx, card
         return None, None
     
@@ -61,23 +61,23 @@ class QuantumCollapseManager:
         if not card.is_entangled or card.is_collapsed:
             return None
         
+        # Generate deterministic seed for this collapse
+        # This ensures all clients in the game collapse the same way
+        collapse_seed = f"{self.game.room_id}|collapse|{self.game.state['currentRound']}|{player_index}|{card_index}"
+        
         # Determine which value this card will collapse to
         if chosen_value:
             collapsed_value = chosen_value
-            partner_collapsed_value = card.entangled_partner if chosen_value == card.original_value else card.original_value
+            partner_collapsed_value = card.entangled_partner_value if chosen_value == card.value else card.value
         else:
-            # Random collapse
-            if random.random() < 0.5:
-                collapsed_value = card.original_value
-                partner_collapsed_value = card.entangled_partner
-            else:
-                collapsed_value = card.entangled_partner
-                partner_collapsed_value = card.original_value
+            # Use deterministic collapse with seed
+            collapsed_value = card.collapse(collapse_seed=collapse_seed)
+            partner_collapsed_value = card.entangled_partner_value if collapsed_value == card.value else card.value
         
-        # Collapse this card
-        old_value = card.original_value
-        card.collapse(collapsed_value)
+        # Set collapse reason
+        card.collapse_reason = 'player_declaration'
         
+        old_value = card.value
         event = CollapseEvent('manual', player_index, self.game.state['currentRound'])
         event.collapsed_cards.append((player_index, card_index, old_value, collapsed_value))
         
@@ -88,13 +88,15 @@ class QuantumCollapseManager:
             
             partner_idx, partner_card = self.find_entangled_card_in_hand(
                 other_player,
-                card.original_value,
-                card.entangled_partner
+                card.value,
+                card.entangled_partner_value
             )
             
             if partner_card:
-                old_partner_value = partner_card.original_value
-                partner_card.collapse(partner_collapsed_value)
+                old_partner_value = partner_card.value
+                # Partner must collapse to the opposite value (quantum entanglement)
+                partner_card.collapse(deterministic_value=partner_collapsed_value)
+                partner_card.collapse_reason = 'entanglement_with_player_' + str(player_index)
                 event.collapsed_cards.append((other_player, partner_idx, old_partner_value, partner_collapsed_value))
                 logger.info(f"Collapsed partner card: Player {other_player}, Card {partner_idx}: {old_partner_value} -> {partner_collapsed_value}")
                 break
@@ -117,9 +119,12 @@ class QuantumCollapseManager:
         # Collapse all entangled cards in this player's hand
         for idx, card in enumerate(hand):
             if card.is_entangled and not card.is_collapsed:
-                # Random collapse
-                old_value = card.original_value
-                new_value = card.collapse()
+                # Generate deterministic seed for this collapse
+                collapse_seed = f"{self.game.room_id}|declaration|{round_name}|{player_index}|{idx}"
+                
+                old_value = card.value
+                new_value = card.collapse(collapse_seed=collapse_seed)
+                card.collapse_reason = f'declaration_{declaration}_in_{round_name}'
                 event.collapsed_cards.append((player_index, idx, old_value, new_value))
                 
                 # Find and collapse partner
@@ -129,15 +134,16 @@ class QuantumCollapseManager:
                     
                     partner_idx, partner_card = self.find_entangled_card_in_hand(
                         other_player,
-                        card.original_value,
-                        card.entangled_partner
+                        card.value,
+                        card.entangled_partner_value
                     )
                     
                     if partner_card:
-                        old_partner = partner_card.original_value
+                        old_partner = partner_card.value
                         # Partner collapses to the opposite value
-                        partner_value = card.entangled_partner if new_value == old_value else old_value
-                        partner_card.collapse(partner_value)
+                        partner_value = card.entangled_partner_value if new_value == old_value else old_value
+                        partner_card.collapse(deterministic_value=partner_value)
+                        partner_card.collapse_reason = f'entanglement_with_declaration'
                         event.collapsed_cards.append((other_player, partner_idx, old_partner, partner_value))
                         break
         
@@ -167,8 +173,12 @@ class QuantumCollapseManager:
         # Collapse all entangled cards
         for idx, card in enumerate(hand):
             if card.is_entangled and not card.is_collapsed:
-                old_value = card.original_value
-                new_value = card.collapse()
+                # Generate deterministic seed
+                collapse_seed = f"{self.game.room_id}|bet_acceptance|{round_name}|{player_index}|{idx}"
+                
+                old_value = card.value
+                new_value = card.collapse(collapse_seed=collapse_seed)
+                card.collapse_reason = f'bet_acceptance_in_{round_name}'
                 event.collapsed_cards.append((player_index, idx, old_value, new_value))
                 
                 # Find and collapse partner
@@ -178,14 +188,15 @@ class QuantumCollapseManager:
                     
                     partner_idx, partner_card = self.find_entangled_card_in_hand(
                         other_player,
-                        card.original_value,
-                        card.entangled_partner
+                        card.value,
+                        card.entangled_partner_value
                     )
                     
                     if partner_card:
-                        old_partner = partner_card.original_value
-                        partner_value = card.entangled_partner if new_value == old_value else old_value
-                        partner_card.collapse(partner_value)
+                        old_partner = partner_card.value
+                        partner_value = card.entangled_partner_value if new_value == old_value else old_value
+                        partner_card.collapse(deterministic_value=partner_value)
+                        partner_card.collapse_reason = f'entanglement_with_bet'
                         event.collapsed_cards.append((other_player, partner_idx, old_partner, partner_value))
                         break
         
@@ -202,8 +213,12 @@ class QuantumCollapseManager:
             hand = self.game.hands[player_idx]
             for idx, card in enumerate(hand):
                 if card.is_entangled and not card.is_collapsed:
-                    old_value = card.original_value
-                    new_value = card.collapse()
+                    # Generate deterministic seed for final collapse
+                    collapse_seed = f"{self.game.room_id}|final_reveal|{self.game.state['manoIndex']}|{player_idx}|{idx}"
+                    
+                    old_value = card.value
+                    new_value = card.collapse(collapse_seed=collapse_seed)
+                    card.collapse_reason = 'final_reveal'
                     event.collapsed_cards.append((player_idx, idx, old_value, new_value))
         
         self.collapse_history.append(event)

@@ -4,6 +4,7 @@ Quantum Card and Deck Management
 
 import random
 import logging
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,11 @@ class QuantumCard:
         self.superposed_value = None
         self.coefficient_a = 0
         self.coefficient_b = 0
+        
+        # Collapse state
+        self.is_collapsed = False
+        self.collapsed_value = None
+        self.collapse_reason = None
         
         self._determine_quantum_state()
     
@@ -103,7 +109,57 @@ class QuantumCard:
         self.coefficient_a = round(alpha, 2)
         self.coefficient_b = round(beta, 2)
     
-    def to_dict(self):
+    def collapse(self, deterministic_value=None, collapse_seed=None):
+        """
+        Collapse the card to a definite value.
+        
+        Args:
+            deterministic_value: If provided, collapse to this value
+            collapse_seed: Seed for deterministic collapse (room_id + round + player info)
+        
+        Returns:
+            The collapsed value (either original or partner value if entangled)
+        """
+        if self.is_collapsed:
+            logger.warning(f"Card {self.value} of {self.suit} already collapsed to {self.collapsed_value}")
+            return self.collapsed_value
+        
+        if deterministic_value:
+            # Explicit collapse to a specific value
+            self.collapsed_value = deterministic_value
+        else:
+            # Probabilistic or seeded collapse
+            if collapse_seed:
+                # Use seed for determinism across all clients
+                hash_obj = hashlib.sha256(str(collapse_seed).encode())
+                seed_int = int(hash_obj.hexdigest(), 16)
+                rng = random.Random(seed_int)
+                collapse_prob = rng.random()
+            else:
+                # Non-deterministic (fallback)
+                collapse_prob = random.random()
+            
+            # For entangled cards: collapse to original or partner value
+            if self.is_entangled:
+                if collapse_prob < 0.5:
+                    self.collapsed_value = self.value
+                else:
+                    self.collapsed_value = self.entangled_partner_value
+            # For superposed cards: collapse to original or superposed value
+            elif self.is_superposed:
+                if collapse_prob < (self.coefficient_a ** 2):
+                    self.collapsed_value = self.value
+                else:
+                    self.collapsed_value = self.superposed_value
+            else:
+                self.collapsed_value = self.value
+        
+        self.is_collapsed = True
+        logger.info(f"Card collapsed: {self.value}♠ ({self.suit}) → {self.collapsed_value}")
+        
+        return self.collapsed_value
+    
+    def to_dict(self)::
         """Convert card to dictionary"""
         return {
             'value': self.value,
@@ -114,7 +170,10 @@ class QuantumCard:
             'is_superposed': self.is_superposed,
             'superposed_value': self.superposed_value,
             'coefficient_a': self.coefficient_a,
-            'coefficient_b': self.coefficient_b
+            'coefficient_b': self.coefficient_b,
+            'is_collapsed': self.is_collapsed,
+            'collapsed_value': self.collapsed_value,
+            'collapse_reason': self.collapse_reason
         }
 
 

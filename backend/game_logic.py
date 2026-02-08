@@ -427,4 +427,69 @@ class QuantumMusGame:
                     })
         
         return entangled_cards
-
+    
+    # ============ COLLAPSE METHODS ============
+    
+    def trigger_collapse_on_declaration(self, player_index, declaration, round_name):
+        """
+        Trigger collapse when a player makes a declaration
+        Returns collapse event data suitable for Socket.IO broadcast
+        """
+        event, penalty = self.collapse_manager.collapse_on_declaration(
+            player_index, declaration, round_name
+        )
+        
+        if not event:
+            return {'success': False, 'error': 'Failed to collapse cards'}
+        
+        # Build response with all hand updates for all players
+        return {
+            'success': True,
+            'collapse_event': event.to_dict(),
+            'penalty': penalty,
+            'player_index': player_index,
+            'declaration': declaration,
+            'round_name': round_name,
+            'updated_hands': {
+                i: [card.to_dict() for card in self.hands.get(i, [])]
+                for i in range(4)
+            }
+        }
+    
+    def trigger_collapse_on_bet_acceptance(self, player_index, round_name):
+        """
+        Trigger collapse when a player accepts a bet
+        """
+        event = self.collapse_manager.collapse_on_bet_acceptance(player_index, round_name)
+        
+        if not event:
+            return {'success': False, 'error': 'Failed to collapse cards'}
+        
+        return {
+            'success': True,
+            'collapse_event': event.to_dict(),
+            'player_index': player_index,
+            'round_name': round_name,
+            'updated_hands': {
+                i: [card.to_dict() for card in self.hands.get(i, [])]
+                for i in range(4)
+            }
+        }
+    
+    def trigger_final_collapse(self):
+        """
+        Trigger final collapse of all remaining entangled cards
+        """
+        event = self.collapse_manager.collapse_all_remaining()
+        
+        if not event:
+            return {'success': False, 'error': 'Failed to collapse cards'}
+        
+        return {
+            'success': True,
+            'collapse_event': event.to_dict(),
+            'final_hands': {
+                i: [card.to_dict() for card in self.hands.get(i, [])]
+                for i in range(4)
+            }
+        }

@@ -21,12 +21,27 @@ except Exception:
 # Directorio del frontend (padre del backend) para servir archivos estáticos
 FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
-# CORS: orígenes permitidos (variable de entorno ALLOWED_ORIGINS; por defecto "*" para no bloquear en pruebas)
+# CORS: orígenes permitidos
+# En producción (Render), especificar ALLOWED_ORIGINS con dominios explícitos
+# En desarrollo, usar * para pruebas locales
 def _get_cors_origins():
-    raw = os.environ.get('ALLOWED_ORIGINS', '*').strip()
-    if not raw or raw == '*':
-        return '*'
-    return [o.strip() for o in raw.split(',') if o.strip()]
+    allowed = os.environ.get('ALLOWED_ORIGINS', '').strip()
+    
+    if allowed:
+        # Usar lista explícita si se proporciona
+        return [o.strip() for o in allowed.split(',') if o.strip()]
+    
+    # Detectar si está en producción (Render establece esta variable)
+    if os.environ.get('RENDER') == 'true':
+        # En Render: permitir solo el dominio de producción
+        render_domain = os.environ.get('RENDER_EXTERNAL_HOSTNAME', '')
+        if render_domain:
+            return [f'https://{render_domain}', f'https://www.{render_domain}']
+        # Fallback seguro si no hay dominio configurado
+        return ['https://localhost']
+    
+    # En desarrollo local, permitir todos los orígenes
+    return '*'
 
 CORS_ORIGINS = _get_cors_origins()
 
@@ -48,14 +63,18 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # Enable CORS (Flask HTTP) usando ALLOWED_ORIGINS
 CORS(app, resources={r"/*": {"origins": CORS_ORIGINS}})
 
-# Initialize Socket.IO (WebSocket) con los mismos orígenes permitidos
+# Initialize Socket.IO (WebSocket) con optimizaciones para Render
 socketio = SocketIO(
     app, 
     cors_allowed_origins=CORS_ORIGINS,
     async_mode='eventlet' if eventlet else 'threading',
     ping_timeout=120,  # Aumentar timeout a 2 minutos
     ping_interval=30,  # Enviar ping cada 30 segundos
-    max_http_buffer_size=1e6  # 1MB buffer para mensajes
+    max_http_buffer_size=1e6,  # 1MB buffer para mensajes
+    engineio_logger=False,  # Desactivar logs verbose de engineio en producción
+    #logger=False,  # Desactivar logs verbose de socketio en producción
+    allow_upgrades=True,  # Permitir upgrades de polling a WebSocket
+    transports=['websocket', 'http_long_polling']  # WebSocket primero, fallback a polling
 )
 
 # Initialize database
@@ -531,6 +550,102 @@ def handle_play_card_with_entanglement(data):
     else:
         emit('game_error', {'error': result.get('error', 'Failed to play card')})
 
+@socketio.on('trigger_declaration_collapse')
+def handle_trigger_declaration_collapse(data):
+    """Handle card collapse when player makes a declaration"""
+    room_id = data.get('room_id')
+    player_index = data.get('player_index')
+    declaration = data.get('declaration')  # 'tengo' or 'no_tengo'
+    round_name = data.get('round_name')  # 'PARES' or 'JUEGO'
+    
+    game = game_manager.get_game(room_id)
+    if not game:
+        emit('game_error', {'error': 'Game not found'})
+        logger.error(f"Game not found for room {room_id} in collapse event")
+        return
+    
+    if player_index != game.state['activePlayerIndex']:
+        emit('game_error', {'error': 'Not your turn'})
+        return
+    
+    # Trigger collapse
+    collapse_result = game.trigger_collapse_on_declaration(player_index, declaration, round_name)
+    
+    if collapse_result['success']:
+        # Broadcast collapse event to ALL players in the room
+        socketio.emit('cards_collapsed', {
+            'success': True,
+            'collapse_event': collapse_result['collapse_event'],
+            'penalty': collapse_result['penalty'],
+            'player_index': player_index,
+            'declaration': declaration,
+            'round_name': round_name,
+            'updated_hands': collapse_result['updated_hands'],
+            'timestamp': datetime.utcnow().isoformat()
+        }, room=room_id)
+        
+        logger.info(f"Collapse broadcast in room {room_id}: Player {player_index} made declaration '{declaration}' in {round_name}")
+    else:
+        socketio.emit('game_error', {'error': collapse_result.get('error', 'Failed to collapse cards')}, room=room_id)
+        logger.error(f"Collapse failed in room {room_id}: {collapse_result.get('error')}")
+
+@socketio.on('trigger_bet_acceptance_collapse')
+def handle_trigger_bet_acceptance_collapse(data):
+    """Handle card collapse when player accepts/makes a bet"""
+    room_id = data.get('room_id')
+    player_index = data.get('player_index')
+    round_name = data.get('round_name')
+    
+    game = game_manager.get_game(room_id)
+    if not game:
+        emit('game_error', {'error': 'Game not found'})
+        return
+    
+    # Trigger collapse
+    collapse_result = game.trigger_collapse_on_bet_acceptance(player_index, round_name)
+    
+    if collapse_result['success']:
+        # Broadcast collapse event to ALL players
+        socketio.emit('cards_collapsed', {
+            'success': True,
+            'collapse_event': collapse_result['collapse_event'],
+            'player_index': player_index,
+            'round_name': round_name,
+            'collapse_reason': 'bet_acceptance',
+            'updated_hands': collapse_result['updated_hands'],
+            'timestamp': datetime.utcnow().isoformat()
+        }, room=room_id)
+        
+        logger.info(f"Collapse broadcast in room {room_id}: Player {player_index} accepted bet in {round_name}")
+    else:
+        socketio.emit('game_error', {'error': collapse_result.get('error', 'Failed to collapse cards')}, room=room_id)
+
+@socketio.on('trigger_final_collapse')
+def handle_trigger_final_collapse(data):
+    """Handle final collapse of all remaining entangled cards at hand end"""
+    room_id = data.get('room_id')
+    
+    game = game_manager.get_game(room_id)
+    if not game:
+        emit('game_error', {'error': 'Game not found'})
+        return
+    
+    # Trigger final collapse
+    collapse_result = game.trigger_final_collapse()
+    
+    if collapse_result['success']:
+        # Broadcast final collapse to ALL players
+        socketio.emit('final_cards_collapsed', {
+            'success': True,
+            'collapse_event': collapse_result['collapse_event'],
+            'final_hands': collapse_result['final_hands'],
+            'timestamp': datetime.utcnow().isoformat()
+        }, room=room_id)
+        
+        logger.info(f"Final collapse broadcast in room {room_id}: All remaining cards collapsed")
+    else:
+        socketio.emit('game_error', {'error': collapse_result.get('error', 'Failed to collapse cards')}, room=room_id)
+
 
 # ==================== RUN SERVER ====================
 
@@ -538,6 +653,11 @@ if __name__ == '__main__':
     host = os.environ.get('HOST', '0.0.0.0')
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+    
+    # Log configuración inicial
     logger.info(f"Starting Quantum Mus server on {host}:{port} (debug={debug})...")
+    logger.info(f"Environment: {'Render' if os.environ.get('RENDER') == 'true' else 'Local/Other'}")
     logger.info("CORS allowed origins: " + ("* (all)" if CORS_ORIGINS == "*" else str(CORS_ORIGINS)))
-    socketio.run(app, host=host, port=port, debug=debug)
+    
+    # socketio.run() manejará la configuración a través de gunicorn en producción
+    socketio.run(app, host=host, port=port, debug=debug, allow_unsafe_werkzeug=True)
