@@ -3458,6 +3458,7 @@ function initGame() {
   // Start timer for a single player with callback on timeout
   function startPlayerTurnTimer(index, duration = 10, onTimeout = null) {
     console.log(`[startPlayerTurnTimer] Starting turn for player ${index + 1}, Round: ${gameState.currentRound}`);
+    const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
 
     // If in PARES/JUEGO/PUNTO betting phases and this player cannot bet,
     // skip them immediately (no timer, no buttons) and move to next eligible.
@@ -3541,20 +3542,22 @@ function initGame() {
       aiDecisionTimeout = null;
     }
     
-    // Set timeout handler
-    timerInterval = setTimeout(() => {
-      // Timeout - auto action
-      if (onTimeout) {
-        onTimeout();
-      } else {
-        handleTimeout(index);
-      }
-    }, duration * 1000);
+    // Set timeout handler (offline/local only)
+    if (!isOnlineGame) {
+      timerInterval = setTimeout(() => {
+        // Timeout - auto action
+        if (onTimeout) {
+          onTimeout();
+        } else {
+          handleTimeout(index);
+        }
+      }, duration * 1000);
+    }
     
     console.log(`[startPlayerTurnTimer] Timer set for ${duration}s. Is AI player? ${index !== 0}`);
     
-    // If AI player, make decision
-    if (index !== 0) {
+    // If AI player, make decision (offline/local only)
+    if (!isOnlineGame && index !== 0) {
       console.log(`[startPlayerTurnTimer] Triggering AI decision for player ${index + 1}`);
       makeAIDecision(index);
     }
@@ -3626,6 +3629,7 @@ function initGame() {
   
   // Start all players' timers simultaneously
   function startAllPlayersTimer(duration = 10) {
+    const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
     // Show all timer bars for simultaneous play
     for (let i = 0; i < 4; i++) {
       const timerBar = document.querySelector(`#timer-bar-player${i + 1}`);
@@ -3647,35 +3651,39 @@ function initGame() {
     }
     
     if (timerInterval) clearTimeout(timerInterval);
-    timerInterval = setTimeout(() => {
-      // All timers expired - auto discard all cards for players who haven't acted
-      handleAllPlayersTimeout();
-    }, duration * 1000);
+    if (!isOnlineGame) {
+      timerInterval = setTimeout(() => {
+        // All timers expired - auto discard all cards for players who haven't acted
+        handleAllPlayersTimeout();
+      }, duration * 1000);
+    }
 
-    // Failsafe: set per-AI fallback timeouts in case AI-specific timeouts fail (works across hands)
-    try {
-      const localIdx = window.currentLocalPlayerIndex ?? 0;
-      gameState.autoDiscardTimeouts = gameState.autoDiscardTimeouts || {};
-      // Clear any previous per-AI timeouts first
-      Object.keys(gameState.autoDiscardTimeouts).forEach(k => {
-        try { clearTimeout(gameState.autoDiscardTimeouts[k]); } catch (e) {}
-        delete gameState.autoDiscardTimeouts[k];
-      });
-      for (let i = 0; i < 4; i++) {
-        if (i === localIdx) continue; // local player handled by UI
-        // Schedule a fallback discard slightly after the global timer
-        const id = setTimeout(() => {
-          try {
-            if (!gameState.cardsDiscarded || !gameState.cardsDiscarded[i]) {
-              console.log(`[FAILSAFE DISCARD] Auto-discarding player ${i + 1} (failsafe)`);
-              handleDiscard(i, [0,1,2,3]);
-            }
-          } catch (e) { console.warn('Failsafe discard failed', e); }
-        }, (duration * 1000) + 300);
-        gameState.autoDiscardTimeouts[i] = id;
+    // Failsafe: set per-AI fallback timeouts in case AI-specific timeouts fail (offline/local only)
+    if (!isOnlineGame) {
+      try {
+        const localIdx = window.currentLocalPlayerIndex ?? 0;
+        gameState.autoDiscardTimeouts = gameState.autoDiscardTimeouts || {};
+        // Clear any previous per-AI timeouts first
+        Object.keys(gameState.autoDiscardTimeouts).forEach(k => {
+          try { clearTimeout(gameState.autoDiscardTimeouts[k]); } catch (e) {}
+          delete gameState.autoDiscardTimeouts[k];
+        });
+        for (let i = 0; i < 4; i++) {
+          if (i === localIdx) continue; // local player handled by UI
+          // Schedule a fallback discard slightly after the global timer
+          const id = setTimeout(() => {
+            try {
+              if (!gameState.cardsDiscarded || !gameState.cardsDiscarded[i]) {
+                console.log(`[FAILSAFE DISCARD] Auto-discarding player ${i + 1} (failsafe)`);
+                handleDiscard(i, [0,1,2,3]);
+              }
+            } catch (e) { console.warn('Failsafe discard failed', e); }
+          }, (duration * 1000) + 300);
+          gameState.autoDiscardTimeouts[i] = id;
+        }
+      } catch (e) {
+        console.warn('Failed to setup autoDiscardTimeouts', e);
       }
-    } catch (e) {
-      console.warn('Failed to setup autoDiscardTimeouts', e);
     }
     
     // No immediate auto-discard. Only the 10s timer triggers auto-discard for all players.
@@ -3726,6 +3734,10 @@ function initGame() {
   // Handle timeout for a player
   function handleTimeout(playerIndex) {
     console.log(`[TIMEOUT] Player ${playerIndex + 1} in round ${gameState.currentRound}`);
+    if (window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom) {
+      console.warn('[TIMEOUT] Ignored in online mode (server authoritative)');
+      return;
+    }
     
     // Ensure we clear the AI decision timeout to prevent double execution
     if (aiDecisionTimeout) {
@@ -3761,6 +3773,10 @@ function initGame() {
   function makeAIDecision(playerIndex) {
     console.log(`[AI DECISION] Starting decision for player ${playerIndex + 1} in round ${gameState.currentRound}`);
     console.log(`[AI DECISION] Active player: ${gameState.activePlayerIndex + 1}, Expected: ${playerIndex + 1}`);
+    if (window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom) {
+      console.warn('[AI DECISION] Ignored in online mode');
+      return;
+    }
     
     // Clear any previous AI timeout to prevent duplicates
     if (aiDecisionTimeout) {
