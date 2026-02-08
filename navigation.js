@@ -563,6 +563,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         updatePlayersList();
         updateStartButton();
+        // Mark that this room is running in demo/local mode so startGame
+        // initializes locally instead of emitting to the server.
+        gameState.demoMode = true;
         demoBtn.style.display = 'none';
       });
     }
@@ -810,7 +813,8 @@ document.addEventListener('DOMContentLoaded', () => {
   function startGame() {
     window.gameInitialized = false;
     
-    if (gameState.onlineMode && gameState.socket && gameState.socket.connected) {
+    // If demo/local mode was activated, always start locally even if socket is connected
+    if (!gameState.demoMode && gameState.onlineMode && gameState.socket && gameState.socket.connected) {
       emitStartGame();
       // La pantalla de juego se mostrará cuando llegue onlineGameStarted
     } else {

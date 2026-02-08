@@ -24,9 +24,14 @@ class QuantumMusGame:
             game_mode = '4'
         self.game_mode = game_mode
         
-        # Validate players
-        if len(players) != 4:
-            logger.warning(f"Expected 4 players, got {len(players)}")
+        # Validate players (allow 1-4 players for demo mode and online modes)
+        if len(players) < 1:
+            logger.error(f"Game requires at least 1 player, got {len(players)}")
+        elif len(players) > 4:
+            logger.warning(f"Game designed for 4 players, got {len(players)} (extras may not have teams)")
+        
+        # Store actual number of players for dynamic calculations
+        self.num_players = len(players)
         
         # Game state
         self.state = {
@@ -83,20 +88,27 @@ class QuantumMusGame:
         logger.info(f"Created game {room_id} with mode {game_mode}")
     
     def deal_cards(self):
-        """Deal 4 cards to each player"""
+        """Deal 4 cards to each active player"""
+        # Calculate cards needed based on actual number of players
+        cards_needed = 4 * self.num_players
+        
         # Validate deck has enough cards
-        if len(self.deck.cards) < 16:  # 4 cards * 4 players
-            logger.error(f"Insufficient cards in deck: {len(self.deck.cards)}")
+        if len(self.deck.cards) < cards_needed:
+            logger.error(f"Insufficient cards in deck: {len(self.deck.cards)} (need {cards_needed} for {self.num_players} players)")
             return {'success': False, 'error': 'Insufficient cards in deck'}
         
-        # Deal cards
-        for player_idx in range(4):
+        # Deal cards to active players only
+        for player_idx in range(self.num_players):
             self.hands[player_idx] = self.deck.deal(4)
             if not self.hands[player_idx] or len(self.hands[player_idx]) != 4:
                 logger.error(f"Failed to deal 4 cards to player {player_idx}")
                 return {'success': False, 'error': f'Failed to deal cards to player {player_idx}'}
         
-        logger.info(f"Dealt cards to all players in game {self.room_id}")
+        # Clear unused player slots if less than 4 players
+        for player_idx in range(self.num_players, 4):
+            self.hands[player_idx] = []
+        
+        logger.info(f"Dealt cards to {self.num_players} players in game {self.room_id}")
         return {'success': True}
     
     def deal_new_cards(self):
@@ -105,10 +117,10 @@ class QuantumMusGame:
             logger.error(f"deal_new_cards called when not waiting for discard")
             return {'success': False, 'error': 'Not waiting for discard'}
         
-        # Validate all 4 players have discarded
-        if len(self.state['cardsDiscarded']) != 4:
-            logger.warning(f"deal_new_cards called with only {len(self.state['cardsDiscarded'])}/4 players ready")
-            return {'success': False, 'error': f'Not all players ready: {len(self.state["cardsDiscarded"])}/4'}
+        # Validate all active players have discarded
+        if len(self.state['cardsDiscarded']) != self.num_players:
+            logger.warning(f"deal_new_cards called with only {len(self.state['cardsDiscarded'])}/{self.num_players} players ready")
+            return {'success': False, 'error': f'Not all players ready: {len(self.state["cardsDiscarded"])}/{self.num_players}'}
         
         try:
             for player_idx, card_indices in self.state['cardsDiscarded'].items():
@@ -133,8 +145,8 @@ class QuantumMusGame:
                 
                 self.hands[player_idx].extend(new_cards)
             
-            # Validate all players still have 4 cards
-            for player_idx in range(4):
+            # Validate all active players still have 4 cards
+            for player_idx in range(self.num_players):
                 if len(self.hands[player_idx]) != 4:
                     logger.error(f"Player {player_idx} has {len(self.hands[player_idx])} cards after deal (should be 4)")
                     return {'success': False, 'error': f'Card count mismatch for player {player_idx}'}
@@ -180,6 +192,7 @@ class QuantumMusGame:
         return {
             'room_id': self.room_id,
             'game_mode': self.game_mode,
+            'num_players': self.num_players,
             'state': {
                 'currentRound': self.state['currentRound'],
                 'activePlayerIndex': self.state['activePlayerIndex'],

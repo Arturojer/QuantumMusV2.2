@@ -624,6 +624,144 @@ function initGame() {
         gameState.musPhaseActive = true;
       }
     });
+
+    // ==================== LISTENERS PARA EVENTOS CRÍTICOS DEL SERVIDOR ====================
+    
+    /**
+     * cards_discarded: Notificación cuando un jugador descarta cartas
+     * Criticidad: CRÍTICO - Feedback visual de descartes de otros jugadores
+     */
+    socket.on('cards_discarded', (data) => {
+      console.log('[SOCKET] cards_discarded event received:', data);
+      if (!data || typeof data.player_index !== 'number') {
+        console.warn('[SOCKET] Invalid cards_discarded data:', data);
+        return;
+      }
+      
+      const playerIdx = data.player_index;
+      const numCards = data.num_cards;
+      
+      // Marcar este jugador como habiéndose descartado
+      gameState.cardsDiscarded[playerIdx] = Array(numCards).fill(null);
+      console.log(`[SOCKET] Player ${playerIdx + 1} discarded ${numCards} cards. Discard state:`, Object.keys(gameState.cardsDiscarded).length, '/ 4');
+      
+      // Opcional: actualizar UI para mostrar feedback visual
+      // (p.ej., deshabilitar timer de ese jugador, mostrar "discarded" label)
+    });
+
+    /**
+     * round_ended: Notificación cuando una ronda termina
+     * Criticidad: CRÍTICO - Determina cuándo revelar cartas y asignar puntos
+     */
+    socket.on('round_ended', (data) => {
+      console.log('[SOCKET] round_ended event received:', data);
+      if (!data || !data.result) {
+        console.warn('[SOCKET] Invalid round_ended data:', data);
+        return;
+      }
+      
+      const roundResult = data.result;
+      console.log('[SOCKET] Round result:', roundResult);
+      
+      // Revelar todas las cartas para conteo
+      revealAllCards(true);
+      
+      // Esperar a que se revelen las cartas, luego asignar puntos
+      setTimeout(() => {
+        const winningTeam = roundResult.winner || roundResult.team;
+        const points = roundResult.points || 0;
+        
+        if (winningTeam && points > 0) {
+          gameState.teams[winningTeam].score += points;
+          console.log(`[SOCKET] ${winningTeam} awarded ${points} points`);
+          showTeamPointsNotification(winningTeam, points);
+        }
+        
+        updateScoreboard();
+        
+        // Mover a próxima ronda después de delay
+        setTimeout(() => {
+          moveToNextRound();
+        }, 2000);
+      }, 1000);
+    });
+
+    /**
+     * entanglement_activated: Notificación cuando se activa entrelazamiento cuántico
+     * Criticidad: IMPORTANTE - Animaciones y cambios de estado de pares
+     */
+    socket.on('entanglement_activated', (data) => {
+      console.log('[SOCKET] entanglement_activated event received:', data);
+      if (!data) {
+        console.warn('[SOCKET] Invalid entanglement_activated data');
+        return;
+      }
+      
+      const entData = data.entanglement_data || {};
+      const playerIdx = data.player_index;
+      const cardPlayed = data.card_played;
+      const round = data.round;
+      
+      console.log(`[SOCKET] Pair activation: Player ${playerIdx + 1} in round ${round}`, entData);
+      
+      // Registrar evento de activación
+      if (!gameState.entanglement.events) {
+        gameState.entanglement.events = [];
+      }
+      gameState.entanglement.events.push({
+        timestamp: Date.now(),
+        playerIndex: playerIdx,
+        pairId: entData.pair_id,
+        result: entData.result,
+        round: round
+      });
+      
+      // Mostrar animación y notificación (opcional)
+      // showEntanglementActivationMessage(`Pareja ${entData.pair_id} activada!`);
+    });
+
+    /**
+     * entanglement_state: Estado actual de todos los pares entrelazados
+     * Criticidad: IMPORTANTE - Sincronización de estado de entrelazamiento
+     */
+    socket.on('entanglement_state', (data) => {
+      console.log('[SOCKET] entanglement_state event received:', data);
+      if (!data || !data.entanglement) {
+        console.warn('[SOCKET] Invalid entanglement_state data');
+        return;
+      }
+      
+      // Actualizar estado de entrelazamiento global
+      const entanglement = data.entanglement;
+      gameState.entanglement.pairs = entanglement.pairs || [];
+      gameState.entanglement.statistics = entanglement.statistics || gameState.entanglement.statistics;
+      
+      console.log('[SOCKET] Entanglement state updated:', {
+        pairs: gameState.entanglement.pairs.length,
+        activatedPairs: gameState.entanglement.events.length
+      });
+    });
+
+    /**
+     * player_entanglement_info: Información de pares entrelazados específicos de un jugador
+     * Criticidad: IMPORTANTE - Información para decisiones del jugador
+     */
+    socket.on('player_entanglement_info', (data) => {
+      console.log('[SOCKET] player_entanglement_info event received:', data);
+      if (!data || typeof data.player_index !== 'number') {
+        console.warn('[SOCKET] Invalid player_entanglement_info data');
+        return;
+      }
+      
+      const playerIdx = data.player_index;
+      const entangledCards = data.entangled_cards || [];
+      
+      // Almacenar información de pares entrelazados de este jugador
+      gameState.entanglement.playerEntanglements[playerIdx] = entangledCards;
+      
+      console.log(`[SOCKET] Player ${playerIdx + 1} entangled cards:`, entangledCards.length, 'cards');
+    });
+
   } else {
     // Mode local (demo): Initialize local game deck
     initializeLocalGameDeck();
