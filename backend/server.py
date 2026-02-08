@@ -49,7 +49,14 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 CORS(app, resources={r"/*": {"origins": CORS_ORIGINS}})
 
 # Initialize Socket.IO (WebSocket) con los mismos orígenes permitidos
-socketio = SocketIO(app, cors_allowed_origins=CORS_ORIGINS, async_mode='eventlet' if eventlet else 'threading')
+socketio = SocketIO(
+    app, 
+    cors_allowed_origins=CORS_ORIGINS,
+    async_mode='eventlet' if eventlet else 'threading',
+    ping_timeout=120,  # Aumentar timeout a 2 minutos
+    ping_interval=30,  # Enviar ping cada 30 segundos
+    max_http_buffer_size=1e6  # 1MB buffer para mensajes
+)
 
 # Initialize database
 db.init_app(app)
@@ -136,6 +143,12 @@ def serve_static(filename):
 
 # ==================== WEBSOCKET EVENTS ====================
 
+@socketio.on_error_default
+def default_error_handler(e):
+    """Global error handler for Socket.IO"""
+    logger.error(f"Socket.IO error: {e}", exc_info=True)
+    emit('socket_error', {'error': str(e)})
+
 @socketio.on('connect')
 def handle_connect():
     """Handle client connection"""
@@ -147,10 +160,22 @@ def handle_disconnect():
     """Handle client disconnection"""
     logger.info(f"Client disconnected: {request.sid}")
     
-    # Remove player from any rooms/games
-    room_id = room_manager.get_player_room(request.sid)
-    if room_id:
-        handle_leave_room({'room_id': room_id})
+    try:
+        # Remove player from any rooms/games
+        room_id = room_manager.get_player_room(request.sid)
+        if room_id:
+            # Don't use leave_room() during disconnect - socket is already closing
+            # Just clean up the room manager directly
+            room_manager.remove_player(room_id, request.sid)
+            
+            # Notify remaining players of room update
+            remaining_room = room_manager.get_room(room_id)
+            if remaining_room:
+                socketio.emit('room_updated', {
+                    'room': remaining_room
+                }, room=room_id)
+    except Exception as e:
+        logger.error(f"Error during disconnect cleanup for {request.sid}: {e}")
 
 @socketio.on('create_room')
 def handle_create_room(data):
@@ -222,16 +247,23 @@ def handle_leave_room(data):
     """Leave a game room"""
     room_id = data.get('room_id')
     
-    if room_manager.remove_player(room_id, request.sid):
-        leave_room(room_id)
-        
-        # Notify player
-        emit('left_room', {'success': True})
-        
-        # Notify remaining players
-        socketio.emit('room_updated', {
-            'room': room_manager.get_room(room_id)
-        }, room=room_id)
+    try:
+        if room_manager.remove_player(room_id, request.sid):
+            try:
+                leave_room(room_id)
+            except Exception as e:
+                logger.warning(f"Could not leave room {room_id}: {e}")
+            
+            # Notify player
+            emit('left_room', {'success': True})
+            
+            # Notify remaining players
+            socketio.emit('room_updated', {
+                'room': room_manager.get_room(room_id)
+            }, room=room_id)
+    except Exception as e:
+        logger.error(f"Error leaving room {room_id}: {e}", exc_info=True)
+        emit('game_error', {'error': 'Failed to leave room'})
 
 @socketio.on('start_game')
 def handle_start_game(data):
