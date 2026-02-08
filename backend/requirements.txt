@@ -21,5 +21,8 @@ SQLAlchemy==2.0.25
 # Servidor WSGI para Procfile / producción (Socket.IO con eventlet)
 gunicorn==23.0.0
 
-# Worker asíncrono para gunicorn: necesario para Socket.IO en tiempo real
 eventlet==0.33.3
+eventlet==0.33.3
+
+# Quantum Mus - Quantum logic dependencies
+numpy
