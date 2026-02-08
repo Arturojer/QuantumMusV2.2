@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Probabilidades</title>
+</head>
+<body>
+    <h1>Test de Probabilidades</h1>
+    <div id="results"></div>
+
+    <script src="assets/generate-cards.js"></script>
+    <script src="game.js"></script>
+    <script>
+        // Test con cartas A/K, 2/3, 2/3
+        
+        function testProbabilities() {
+            const resultsDiv = document.getElementById('results');
+            let html = '<h2>Test: A/K, 2/3, 2/3</h2>';
+            
+            // Modo 4 reyes
+            window.currentGameMode = '4';
+            const cardValues4 = ['A', '2', '2']; // valores por defecto
+            const entangledInfo4 = [
+                { index: 0, value1: 'A', value2: 'K' },
+                { index: 1, value1: '2', value2: '3' },
+                { index: 2, value1: '2', value2: '3' }
+            ];
+            
+            const paresPr4 = calculateParesProbability(cardValues4, entangledInfo4);
+            const juegoPr4 = calculateJuegoProbability(cardValues4, entangledInfo4, '4');
+            
+            html += '<h3>Modo 4 REYES:</h3>';
+            html += '<p>Pares: ' + paresPr4 + '% (esperado: 50%)</p>';
+            html += '<p>Juego: ' + juegoPr4 + '% (esperado: 0%)</p>';
+            
+            // Modo 8 reyes
+            window.currentGameMode = '8';
+            const cardValues8 = ['A', '2', '2'];
+            const entangledInfo8 = [
+                { index: 0, value1: 'A', value2: 'K' },
+                { index: 1, value1: '2', value2: '3' },
+                { index: 2, value1: '2', value2: '3' }
+            ];
+            
+            const paresPr8 = calculateParesProbability(cardValues8, entangledInfo8);
+            const juegoPr8 = calculateJuegoProbability(cardValues8, entangledInfo8, '8');
+            
+            html += '<h3>Modo 8 REYES:</h3>';
+            html += '<p>Pares: ' + paresPr8 + '% (esperado: 100%)</p>';
+            html += '<p>Juego: ' + juegoPr8 + '% (esperado: 0%)</p>';
+            
+            // Verificación
+            html += '<h3>Verificación:</h3>';
+            const pares4OK = paresPr4 === '50';
+            const juego4OK = juegoPr4 === '0';
+            const pares8OK = paresPr8 === '100';
+            const juego8OK = juegoPr8 === '0';
+            
+            html += '<p style="color:' + (pares4OK ? 'green' : 'red') + '">4 reyes Pares: ' + (pares4OK ? '✓' : '✗') + '</p>';
+            html += '<p style="color:' + (juego4OK ? 'green' : 'red') + '">4 reyes Juego: ' + (juego4OK ? '✓' : '✗') + '</p>';
+            html += '<p style="color:' + (pares8OK ? 'green' : 'red') + '">8 reyes Pares: ' + (pares8OK ? '✓' : '✗') + '</p>';
+            html += '<p style="color:' + (juego8OK ? 'green' : 'red') + '">8 reyes Juego: ' + (juego8OK ? '✓' : '✗') + '</p>';
+            
+            resultsDiv.innerHTML = html;
+        }
+        
+        // Ejecutar test al cargar
+        setTimeout(testProbabilities, 100);
+    </script>
+</body>
+</html>

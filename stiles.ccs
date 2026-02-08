@@ -1,0 +1,592 @@
+/* ═══════════════════════════════════════════════════════════════
+   QUANTUM MUS - ARTISTIC REDESIGN
+   Blueprint aesthetic with hand-drawn charm
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Artistic color palette - soft, elegant, quantum-inspired */
+  --quantum-teal: #2ec4b6;
+  --quantum-coral: #ff9e6d;
+  --quantum-lavender: #a78bfa;
+  --quantum-gold: #f5c518;
+  --quantum-indigo: #4338ca;
+  --paper-cream: #fffaf0;
+  --paper-beige: #f5f0e1;
+  --deep-navy: #0f172a;
+  --charcoal: #1e293b;
+  --sketch-charcoal: #475569;
+  --circuit-blueprint: #64748b;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--deep-navy);
+  font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  color: var(--paper-cream);
+  overflow: hidden;
+  position: relative;
+  height: 100vh;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   QUANTUM CIRCUIT BLUEPRINT BACKGROUND
+   ═══════════════════════════════════════════════════════════════ */
+body::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: 
+    /* Blueprint grid */
+    linear-gradient(rgba(100, 116, 139, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(100, 116, 139, 0.03) 1px, transparent 1px),
+    
+    /* Quantum circuit blueprint - decorative elements */
+    url("data:image/svg+xml,%3Csvg width='800' height='600' viewBox='0 0 800 600' xmlns='http://www.w3.org/2000/svg'%3E
+    
+    %3C!-- Horizontal wires --%3E
+    %3Cline x1='50' y1='100' x2='750' y2='100' stroke='%2364748b' stroke-width='1' stroke-opacity='0.2' stroke-dasharray='5,5'/%3E
+    %3Cline x1='50' y1='180' x2='750' y2='180' stroke='%2364748b' stroke-width='1' stroke-opacity='0.2' stroke-dasharray='5,5'/%3E
+    %3Cline x1='50' y1='260' x2='750' y2='260' stroke='%2364748b' stroke-width='1' stroke-opacity='0.2' stroke-dasharray='5,5'/%3E
+    %3Cline x1='50' y1='340' x2='750' y2='340' stroke='%2364748b' stroke-width='1' stroke-opacity='0.2' stroke-dasharray='5,5'/%3E
+    %3Cline x1='50' y1='420' x2='750' y2='420' stroke='%2364748b' stroke-width='1' stroke-opacity='0.2' stroke-dasharray='5,5'/%3E
+    %3Cline x1='50' y1='500' x2='750' y2='500' stroke='%2364748b' stroke-width='1' stroke-opacity='0.2' stroke-dasharray='5,5'/%3E
+    
+    %3C!-- Hadamard gates (H) --%3E
+    %3Crect x='150' y='90' width='30' height='30' fill='none' stroke='%232ec4b6' stroke-width='1.5' stroke-opacity='0.3'/%3E
+    %3Ctext x='165' y='110' font-family='monospace' font-size='14' fill='%232ec4b6' text-anchor='middle' opacity='0.4'%3EH%3C/text%3E
+    
+    %3Crect x='350' y='250' width='30' height='30' fill='none' stroke='%232ec4b6' stroke-width='1.5' stroke-opacity='0.3'/%3E
+    %3Ctext x='365' y='270' font-family='monospace' font-size='14' fill='%232ec4b6' text-anchor='middle' opacity='0.4'%3EH%3C/text%3E
+    
+    %3Crect x='550' y='410' width='30' height='30' fill='none' stroke='%232ec4b6' stroke-width='1.5' stroke-opacity='0.3'/%3E
+    %3Ctext x='565' y='430' font-family='monospace' font-size='14' fill='%232ec4b6' text-anchor='middle' opacity='0.4'%3EH%3C/text%3E
+    
+    %3C!-- CNOT gates --%3E
+    %3Ccircle cx='250' cy='100' r='8' fill='none' stroke='%23ff9e6d' stroke-width='1.5' stroke-opacity='0.3'/%3E
+    %3Ccircle cx='250' cy='180' r='8' fill='none' stroke='%23ff9e6d' stroke-width='1.5' stroke-opacity='0.3'/%3E
+    %3Cline x1='250' y1='100' x2='250' y2='180' stroke='%23ff9e6d' stroke-width='1' stroke-opacity='0.3'/%3E
+    %3Ccircle cx='250' cy='100' r='3' fill='%23ff9e6d' opacity='0.3'/%3E
+    
+    %3Ccircle cx='450' cy='260' r='8' fill='none' stroke='%23ff9e6d' stroke-width='1.5' stroke-opacity='0.3'/%3E
+    %3Ccircle cx='450' cy='340' r='8' fill='none' stroke='%23ff9e6d' stroke-width='1.5' stroke-opacity='0.3'/%3E
+    %3Cline x1='450' y1='260' x2='450' y2='340' stroke='%23ff9e6d' stroke-width='1' stroke-opacity='0.3'/%3E
+    %3Ccircle cx='450' cy='260' r='3' fill='%23ff9e6d' opacity='0.3'/%3E
+    
+    %3C!-- Measurement gates (M) --%3E
+    %3Cpath d='M600,95 L630,95 L630,115 L615,130 L600,115 Z' fill='none' stroke='%23a78bfa' stroke-width='1.5' stroke-opacity='0.3'/%3E
+    %3Ctext x='615' y='110' font-family='monospace' font-size='12' fill='%23a78bfa' text-anchor='middle' opacity='0.4'%3EM%3C/text%3E
+    
+    %3Cpath d='M700,415 L730,415 L730,435 L715,450 L700,435 Z' fill='none' stroke='%23a78bfa' stroke-width='1.5' stroke-opacity='0.3'/%3E
+    %3Ctext x='715' y='430' font-family='monospace' font-size='12' fill='%23a78bfa' text-anchor='middle' opacity='0.4'%3EM%3C/text%3E
+    
+    %3C!-- Decorative quantum elements --%3E
+    %3Ccircle cx='100' cy='300' r='25' fill='none' stroke='%232ec4b6' stroke-width='1' stroke-opacity='0.15' stroke-dasharray='4,4'/%3E
+    %3Ccircle cx='100' cy='300' r='40' fill='none' stroke='%232ec4b6' stroke-width='0.5' stroke-opacity='0.1' stroke-dasharray='3,3'/%3E
+    %3Ctext x='100' y='305' font-family='monospace' font-size='16' fill='%232ec4b6' text-anchor='middle' opacity='0.2'%3EΨ%3C/text%3E
+    
+    %3Ccircle cx='700' cy='200' r='25' fill='none' stroke='%23ff9e6d' stroke-width='1' stroke-opacity='0.15' stroke-dasharray='4,4'/%3E
+    %3Ccircle cx='700' cy='200' r='40' fill='none' stroke='%23ff9e6d' stroke-width='0.5' stroke-opacity='0.1' stroke-dasharray='3,3'/%3E
+    %3Ctext x='700' y='205' font-family='monospace' font-size='16' fill='%23ff9e6d' text-anchor='middle' opacity='0.2'%3EΦ%3C/text%3E
+    
+    %3C!-- Title decoration --%3E
+    %3Ctext x='400' y='50' font-family='monospace' font-size='18' fill='%2364748b' text-anchor='middle' opacity='0.15'%3EQUANTUM CIRCUIT v3.14%3C/text%3E
+    %3Ctext x='400' y='75' font-family='monospace' font-size='12' fill='%2364748b' text-anchor='middle' opacity='0.1'%3E// Superposition Engine // Entanglement Protocol //%3C/text%3E
+    
+    %3C/svg%3E");
+  background-size: 100% 100%;
+  background-position: center;
+  z-index: -2;
+  opacity: 0.85;
+}
+
+/* Blueprint overlay for subtle paper texture */
+body::after {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: 
+    radial-gradient(circle at 10% 20%, rgba(46, 196, 182, 0.02) 0%, transparent 25%),
+    radial-gradient(circle at 90% 80%, rgba(255, 158, 109, 0.02) 0%, transparent 30%),
+    linear-gradient(135deg, rgba(167, 139, 250, 0.01) 0%, rgba(67, 56, 202, 0.03) 100%);
+  z-index: -1;
+  pointer-events: none;
+}
+
+#game-container {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   GAME TITLE - ARTISTIC QUANTUM TYPOGRAPHY
+   ═══════════════════════════════════════════════════════════════ */
+.game-title {
+  text-align: center;
+  margin-bottom: 40px;
+  position: relative;
+  z-index: 10;
+}
+
+.game-title h1 {
+  font-size: 4.5rem;
+  font-weight: 200;
+  letter-spacing: 8px;
+  background: linear-gradient(135deg, var(--quantum-teal), var(--quantum-lavender), var(--quantum-coral));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  position: relative;
+  margin-bottom: 10px;
+}
+
+.game-title h1::before {
+  content: "⟨";
+  position: absolute;
+  left: -40px;
+  font-size: 3.5rem;
+  color: var(--quantum-teal);
+  opacity: 0.8;
+}
+
+.game-title h1::after {
+  content: "⟩";
+  position: absolute;
+  right: -40px;
+  font-size: 3.5rem;
+  color: var(--quantum-teal);
+  opacity: 0.8;
+}
+
+.game-title .subtitle {
+  font-size: 1.1rem;
+  color: var(--circuit-blueprint);
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-top: 5px;
+  font-weight: 300;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   HAND-DRAWN CARD DESIGN - ARTISTIC REDESIGN
+   ═══════════════════════════════════════════════════════════════ */
+.quantum-card {
+  position: relative;
+  width: 160px;
+  height: 240px;
+  background: var(--paper-beige);
+  border-radius: 16px;
+  box-shadow: 
+    0 10px 30px rgba(0, 0, 0, 0.4),
+    0 0 20px rgba(46, 196, 182, 0.1);
+  transform: rotate(var(--rotation, 0deg));
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  cursor: pointer;
+  z-index: 5;
+}
+
+.quantum-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: 
+    radial-gradient(circle at 30% 30%, rgba(245, 197, 24, 0.05) 0%, transparent 30%),
+    radial-gradient(circle at 70% 70%, rgba(167, 139, 250, 0.03) 0%, transparent 40%);
+  pointer-events: none;
+}
+
+.quantum-card::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  border: 1.5px solid var(--sketch-charcoal);
+  border-radius: 12px;
+  pointer-events: none;
+  opacity: 0.2;
+}
+
+.quantum-card:hover {
+  transform: rotate(var(--rotation, 0deg)) translateY(-10px) scale(1.05);
+  box-shadow: 
+    0 15px 40px rgba(0, 0, 0, 0.5),
+    0 0 30px rgba(46, 196, 182, 0.25);
+  z-index: 20;
+}
+
+/* Card decorative border - hand-drawn style */
+.quantum-card-border {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  right: 4px;
+  bottom: 4px;
+  border: 1px solid var(--sketch-charcoal);
+  border-radius: 14px;
+  pointer-events: none;
+  opacity: 0.15;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   DIRAC NOTATION - ELEGANT TYPOGRAPHY
+   ═══════════════════════════════════════════════════════════════ */
+.dirac-label {
+  position: absolute;
+  font-family: 'Courier New', monospace;
+  font-weight: bold;
+  font-size: 26px;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2);
+  z-index: 10;
+  letter-spacing: 1px;
+}
+
+.card-top {
+  top: 20px;
+  left: 20px;
+  background: linear-gradient(135deg, var(--quantum-indigo), var(--quantum-lavender));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.card-bottom {
+  bottom: 20px;
+  right: 20px;
+  transform: rotate(180deg);
+  background: linear-gradient(135deg, var(--quantum-indigo), var(--quantum-lavender));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SUIT ICONS - ARTISTIC SYMBOLS
+   ═══════════════════════════════════════════════════════════════ */
+.suit-icon {
+  position: absolute;
+  font-size: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  font-weight: bold;
+  z-index: 8;
+}
+
+.suit-cups { color: var(--quantum-coral); }
+.suit-coins { color: var(--quantum-gold); }
+.suit-clubs { color: var(--quantum-indigo); }
+.suit-swords { color: var(--quantum-teal); }
+
+/* ═══════════════════════════════════════════════════════════════
+   BLOCH SPHERE - MINI 3D VISUALIZATION
+   ═══════════════════════════════════════════════════════════════ */
+.bloch-sphere {
+  position: absolute;
+  width: 45px;
+  height: 45px;
+  top: 15px;
+  right: 15px;
+  z-index: 15;
+}
+
+.bloch-sphere svg {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   HAND CONTAINERS - ELEGANT LAYOUT
+   ═══════════════════════════════════════════════════════════════ */
+.hand-container {
+  position: relative;
+  width: 100%;
+  max-width: 800px;
+  height: 280px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 25px;
+  margin: 30px 0;
+  perspective: 1000px;
+}
+
+.hand-label {
+  position: absolute;
+  top: -45px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 1.3rem;
+  font-weight: 500;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--circuit-blueprint);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.hand-label.player {
+  color: var(--quantum-teal);
+}
+
+.hand-label.bot {
+  color: var(--quantum-lavender);
+  opacity: 0.8;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   QUANTUM GATE BUTTONS - BLUEPRINT STYLE
+   ═══════════════════════════════════════════════════════════════ */
+.controls {
+  position: absolute;
+  bottom: 40px;
+  display: flex;
+  gap: 25px;
+  z-index: 100;
+  background: rgba(30, 41, 59, 0.7);
+  backdrop-filter: blur(10px);
+  padding: 20px 30px;
+  border-radius: 20px;
+  border: 1px solid var(--circuit-blueprint);
+  box-shadow: 
+    0 4px 20px rgba(0, 0, 0, 0.4),
+    inset 0 0 15px rgba(100, 116, 139, 0.1);
+}
+
+.quantum-gate {
+  background: linear-gradient(135deg, rgba(46, 196, 182, 0.15), rgba(46, 196, 182, 0.05));
+  border: 2px solid var(--quantum-teal);
+  color: var(--quantum-teal);
+  font-family: 'Courier New', monospace;
+  font-weight: bold;
+  font-size: 1.4rem;
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 
+    0 4px 15px rgba(46, 196, 182, 0.2),
+    inset 0 0 10px rgba(46, 196, 182, 0.1);
+}
+
+.quantum-gate:hover {
+  transform: scale(1.15) rotate(5deg);
+  box-shadow: 
+    0 6px 25px rgba(46, 196, 182, 0.4),
+    inset 0 0 15px rgba(46, 196, 182, 0.2);
+  background: linear-gradient(135deg, rgba(46, 196, 182, 0.3), rgba(46, 196, 182, 0.15));
+}
+
+.quantum-gate:active {
+  transform: scale(0.95);
+}
+
+.quantum-gate::before {
+  content: "";
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(46, 196, 182, 0.3) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+
+.quantum-gate:hover::before {
+  opacity: 1;
+}
+
+.quantum-gate.m-gate {
+  border-color: var(--quantum-lavender);
+  color: var(--quantum-lavender);
+  background: linear-gradient(135deg, rgba(167, 139, 250, 0.15), rgba(167, 139, 250, 0.05));
+  box-shadow: 
+    0 4px 15px rgba(167, 139, 250, 0.2),
+    inset 0 0 10px rgba(167, 139, 250, 0.1);
+}
+
+.quantum-gate.m-gate:hover {
+  box-shadow: 
+    0 6px 25px rgba(167, 139, 250, 0.4),
+    inset 0 0 15px rgba(167, 139, 250, 0.2);
+  background: linear-gradient(135deg, rgba(167, 139, 250, 0.3), rgba(167, 139, 250, 0.15));
+}
+
+.quantum-gate.m-gate::before {
+  background: radial-gradient(circle, rgba(167, 139, 250, 0.3) 0%, transparent 70%);
+}
+
+.quantum-gate.i-gate {
+  border-color: var(--quantum-coral);
+  color: var(--quantum-coral);
+  background: linear-gradient(135deg, rgba(255, 158, 109, 0.15), rgba(255, 158, 109, 0.05));
+  box-shadow: 
+    0 4px 15px rgba(255, 158, 109, 0.2),
+    inset 0 0 10px rgba(255, 158, 109, 0.1);
+}
+
+.quantum-gate.i-gate:hover {
+  box-shadow: 
+    0 6px 25px rgba(255, 158, 109, 0.4),
+    inset 0 0 15px rgba(255, 158, 109, 0.2);
+  background: linear-gradient(135deg, rgba(255, 158, 109, 0.3), rgba(255, 158, 109, 0.15));
+}
+
+.quantum-gate.i-gate::before {
+  background: radial-gradient(circle, rgba(255, 158, 109, 0.3) 0%, transparent 70%);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PROBABILITY BAR - ELEGANT DISPLAY
+   ═══════════════════════════════════════════════════════════════ */
+.probability-display {
+  position: absolute;
+  bottom: -80px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  color: var(--circuit-blueprint);
+  font-size: 0.95rem;
+  width: 300px;
+}
+
+.probability-label {
+  margin-bottom: 8px;
+  font-weight: 500;
+  letter-spacing: 1px;
+}
+
+.probability-bar-container {
+  height: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid rgba(100, 116, 139, 0.3);
+}
+
+.probability-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--quantum-teal), var(--quantum-lavender));
+  border-radius: 5px;
+  position: relative;
+  transition: width 0.5s ease;
+}
+
+.probability-bar-fill::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.2) 0px,
+    rgba(255, 255, 255, 0.2) 3px,
+    transparent 3px,
+    transparent 6px
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SUPERPOSITION EFFECTS - GHOST CARDS & ANIMATIONS
+   ═══════════════════════════════════════════════════════════════ */
+.superposition-ghost {
+  opacity: 0.25;
+  filter: blur(1.5px);
+  position: absolute;
+  z-index: 1;
+}
+
+@keyframes wobble {
+  0%, 100% { transform: rotate(-1deg) scale(0.98); }
+  25% { transform: rotate(0.5deg) scale(1); }
+  50% { transform: rotate(1deg) scale(0.99); }
+  75% { transform: rotate(-0.5deg) scale(1.01); }
+}
+
+.wobble {
+  animation: wobble 6s infinite ease-in-out;
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 15px rgba(46, 196, 182, 0.15); }
+  50% { box-shadow: 0 0 25px rgba(46, 196, 182, 0.3); }
+}
+
+.pulse {
+  animation: pulse 3s infinite ease-in-out;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CHARACTER CAMEOS - MINI PORTRAITS
+   ═══════════════════════════════════════════════════════════════ */
+.character-cameo {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  width: 35px;
+  height: 50px;
+  z-index: 12;
+  opacity: 0.9;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE DESIGN
+   ═══════════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  .game-title h1 {
+    font-size: 2.8rem;
+    letter-spacing: 4px;
+  }
+  
+  .game-title h1::before,
+  .game-title h1::after {
+    font-size: 2.2rem;
+  }
+  
+  .quantum-card {
+    width: 130px;
+    height: 195px;
+  }
+  
+  .dirac-label {
+    font-size: 20px;
+  }
+  
+  .controls {
+    flex-direction: column;
+    padding: 15px;
+  }
+  
+  .quantum-gate {
+    width: 60px;
+    height: 60px;
+    font-size: 1.2rem;
+  }
+}

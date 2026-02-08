@@ -1,0 +1,2842 @@
+// Quantum Mus - 4 Player Game with Character Avatars
+// Only initialize when entering the game screen (after lobby)
+let gameInitialized = false;
+
+// Export gameInitialized so it can be reset from navigation.js
+Object.defineProperty(window, 'gameInitialized', {
+  get: () => gameInitialized,
+  set: (value) => { gameInitialized = value; }
+});
+
+// ===================== GAME STATE MANAGER =====================
+const gameState = {
+  currentRound: 'MUS', // MUS, GRANDE, CHICA, PARES, JUEGO
+  manoIndex: 0, // Player who starts (mano)
+  activePlayerIndex: 0, // Current player making decision
+  teams: {
+    team1: { players: [0, 2], score: 0, name: 'Copenhague' }, // Preskill + Zoller
+    team2: { players: [1, 3], score: 0, name: 'Bohmian' } // Cirac + Deutsch
+  },
+  currentBet: {
+    amount: 0,
+    bettingTeam: null, // 'team1' or 'team2'
+    betType: null, // 'envido', 'ordago'
+    responses: {} // Track each player's response
+  },
+  roundActions: {}, // Track what each player has done this round
+  musPhaseActive: true,
+  cardsDiscarded: {}, // Track discarded cards per player
+  waitingForDiscard: false,
+  allPlayersPassed: false,
+  pendingPoints: { // Points to be awarded at hand end
+    team1: { GRANDE: 0, CHICA: 0, PARES: 0, JUEGO: 0 },
+    team2: { GRANDE: 0, CHICA: 0, PARES: 0, JUEGO: 0 }
+  },
+  entanglement: {
+    pairs: [], // All entangled pairs in the game
+    events: [], // Entanglement activation events this hand
+    statistics: {
+      total_pairs: 0,
+      activated_pairs: 0,
+      superposition_pairs: 0,
+      game_mode: '4',
+      pairs_per_team: 2
+    },
+    playerEntanglements: {} // Map of player index to their entangled cards info
+  }
+};
+
+// Get team for a player index
+function getPlayerTeam(playerIndex) {
+  if (gameState.teams.team1.players.includes(playerIndex)) return 'team1';
+  if (gameState.teams.team2.players.includes(playerIndex)) return 'team2';
+  return null;
+}
+
+// Get team mate of a player
+function getTeammate(playerIndex) {
+  const team = getPlayerTeam(playerIndex);
+  if (!team) return null;
+  const teammates = gameState.teams[team].players;
+  return teammates.find(p => p !== playerIndex);
+}
+
+// Get opponent team
+function getOpponentTeam(team) {
+  return team === 'team1' ? 'team2' : 'team1';
+}
+
+// Reset round state
+function resetRoundState() {
+  gameState.roundActions = {};
+  gameState.currentBet = {
+    amount: 0,
+    bettingTeam: null,
+    betType: null,
+    responses: {}
+  };
+  gameState.allPlayersPassed = false;
+}
+
+// Move to next player (counter-clockwise)
+function nextPlayer() {
+  gameState.activePlayerIndex = (gameState.activePlayerIndex + 3) % 4; // -1 mod 4 = +3 mod 4
+  return gameState.activePlayerIndex;
+}
+
+// Get next player from opponent team in counter-clockwise order
+function getNextOpponentPlayer(fromPlayerIndex, opponentTeam) {
+  const opponentPlayers = gameState.teams[opponentTeam].players;
+  let current = fromPlayerIndex;
+  
+  // Move counter-clockwise until we find an opponent team player
+  for (let i = 0; i < 4; i++) {
+    current = (current + 3) % 4; // Move counter-clockwise
+    if (opponentPlayers.includes(current)) {
+      return current;
+    }
+  }
+  return opponentPlayers[0]; // Fallback
+}
+
+// Get teammate of opponent who hasn't responded yet
+function getOtherOpponentPlayer(opponentTeam, respondedPlayer) {
+  const opponentPlayers = gameState.teams[opponentTeam].players;
+  return opponentPlayers.find(p => p !== respondedPlayer);
+}
+
+// Check if all players in a team have responded
+function teamHasResponded(team) {
+  const teamPlayers = gameState.teams[team].players;
+  return teamPlayers.every(p => gameState.currentBet.responses[p] !== undefined);
+}
+
+// ================= ENTANGLEMENT UTILITIES =================
+
+// Get entangled cards for a player
+function getPlayerEntangledCards(playerIndex) {
+  return gameState.entanglement.playerEntanglements[playerIndex] || [];
+}
+
+// Check if a card is entangled
+function isCardEntangled(playerIndex, cardIndex) {
+  const entangled = getPlayerEntangledCards(playerIndex);
+  return entangled.some(e => e.card_index === cardIndex);
+}
+
+// Get partner player for an entangled card
+function getEntangledPartnerPlayer(playerIndex, cardIndex) {
+  const entangled = getPlayerEntangledCards(playerIndex);
+  const pair = entangled.find(e => e.card_index === cardIndex);
+  return pair ? pair.partner_player : null;
+}
+
+// Update entanglement state from server
+function updateEntanglementState(entanglementData) {
+  if (!entanglementData) return;
+  
+  gameState.entanglement.pairs = entanglementData.pairs || [];
+  gameState.entanglement.events = entanglementData.events || [];
+  gameState.entanglement.statistics = entanglementData.statistics || gameState.entanglement.statistics;
+  
+  // Update player entanglement maps
+  for (let playerIdx = 0; playerIdx < 4; playerIdx++) {
+    gameState.entanglement.playerEntanglements[playerIdx] = getPlayerEntangledCardsFromPairs(playerIdx);
+  }
+}
+
+// Helper to build player entanglement map from pairs
+function getPlayerEntangledCardsFromPairs(playerIndex) {
+  const entangled = [];
+  
+  // This will be populated from the hand data when cards are dealt/updated
+  // We'll need to cross-reference with the actual cards in the player's hand
+  return entangled;
+}
+
+// Reset entanglement for new hand
+function resetEntanglementForNewHand() {
+  gameState.entanglement.events = [];
+  gameState.entanglement.playerEntanglements = {};
+}
+
+function initGame() {
+  console.log('initGame called, gameInitialized:', gameInitialized);
+  
+  const gameContainer = document.getElementById('game-container');
+  if (!gameContainer) {
+    console.error('Game container not found!');
+    return;
+  }
+  
+  if (gameInitialized) {
+    console.log('Game already initialized, skipping');
+    return;
+  }
+  
+  gameInitialized = true;
+  console.log('Initializing game...');
+  
+  // Asegurar que el timer esté oculto al inicio del juego
+  const timerModal = document.getElementById('timer-modal');
+  if (timerModal) timerModal.style.opacity = '0';
+  
+  // Clear any previous content
+  gameContainer.innerHTML = '';
+  
+  // Get players and game mode from lobby (set by initializeGame)
+  const lobbyPlayers = window.currentPlayers || [];
+  const gameMode = window.currentGameMode || '4';
+  const localPlayerIndex = window.currentLocalPlayerIndex ?? 0;
+  
+  console.log('Game Mode:', gameMode);
+  console.log('Lobby Players:', lobbyPlayers);
+  console.log('Local Player Index:', localPlayerIndex);
+  
+  const characterNames = { preskill: 'Preskill', cirac: 'Cirac', zoller: 'Zoller', deutsch: 'Deutsch' };
+  
+  // Build raw players from lobby
+  const rawPlayers = [
+    { id: 'player1', name: 'Preskill', character: 'preskill', playerName: '', score: 0 },
+    { id: 'player2', name: 'Cirac', character: 'cirac', playerName: '', score: 0 },
+    { id: 'player3', name: 'Zoller', character: 'zoller', playerName: '', score: 0 },
+    { id: 'player4', name: 'Deutsch', character: 'deutsch', playerName: '', score: 0 }
+  ];
+  
+  lobbyPlayers.forEach((lp, idx) => {
+    if (rawPlayers[idx]) {
+      rawPlayers[idx].name = characterNames[lp.character] || rawPlayers[idx].name;
+      rawPlayers[idx].character = lp.character || rawPlayers[idx].character;
+      rawPlayers[idx].playerName = lp.name || '';
+    }
+  });
+  
+  // Reorder so local player is always at bottom (player1): [local, opponent, teammate, opponent]
+  // Teams: (0,2) vs (1,3) - so index 2 is teammate
+  const L = localPlayerIndex;
+  const players = [
+    rawPlayers[L],
+    rawPlayers[(L + 1) % 4],
+    rawPlayers[(L + 2) % 4],
+    rawPlayers[(L + 3) % 4]
+  ].map((p, i) => ({ ...p, id: `player${i + 1}` }));
+  
+  // Add quantum gate decorations to background
+  addQuantumGateDecorations();
+  
+  // Add famous quantum circuit to background
+  addQuantumCircuitToBackground();
+
+  players.forEach((player, index) => {
+    createPlayerZone(player, index, gameMode);
+  });
+
+  // Hacer matching de cartas entrelazadas entre player1 y player3
+  matchEntangledCards();
+
+  // Create central scoreboard
+  createScoreboard();
+
+  // Animación del reparto de cartas al inicio del turno
+  playDealAnimation();
+
+  // Start the game after deal animation completes (cards take about 2-3 seconds to deal)
+  setTimeout(() => {
+    console.log('Starting game - first turn');
+    console.log('Mano index:', gameState.manoIndex);
+    console.log('Current round:', gameState.currentRound);
+    gameState.activePlayerIndex = gameState.manoIndex;
+    updateRoundDisplay();
+    updateScoreboard();
+    console.log('Active player:', gameState.activePlayerIndex);
+    startPlayerTurnTimer(gameState.activePlayerIndex);
+  }, 3000);
+
+  // ===================== BACKGROUND DECORATIONS =====================
+
+  function addQuantumGateDecorations() {
+    const gates = [
+      { type: 'H', className: 'gate-h-bg', top: '15%', left: '20%' },
+      { type: 'H', className: 'gate-h-bg', top: '35%', left: '65%' },
+      { type: 'H', className: 'gate-h-bg', top: '70%', left: '85%' },
+      { type: '', className: 'gate-cnot-bg', top: '40%', left: '35%' },
+      { type: '', className: 'gate-cnot-bg', top: '60%', left: '55%' },
+      { type: 'M', className: 'gate-m-bg', top: '75%', left: '40%' },
+      { type: 'M', className: 'gate-m-bg', top: '25%', left: '80%' }
+    ];
+
+    gates.forEach(gate => {
+      const gateEl = document.createElement('div');
+      gateEl.className = `quantum-gate-bg ${gate.className}`;
+      gateEl.style.top = gate.top;
+      gateEl.style.left = gate.left;
+      gateEl.textContent = gate.type;
+      document.body.appendChild(gateEl);
+    });
+  }
+
+  function addQuantumCircuitToBackground() {
+    // Create a famous quantum circuit - Bell State (Quantum Entanglement)
+    const circuitSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    circuitSvg.setAttribute('viewBox', '0 0 1200 300');
+    circuitSvg.setAttribute('preserveAspectRatio', 'none');
+    circuitSvg.style.position = 'fixed';
+    circuitSvg.style.top = '50%';
+    circuitSvg.style.left = '50%';
+    circuitSvg.style.transform = 'translate(-50%, -50%)';
+    circuitSvg.style.width = '90vw';
+    circuitSvg.style.height = '40vh';
+    circuitSvg.style.zIndex = '0';
+    circuitSvg.style.pointerEvents = 'none';
+    circuitSvg.style.opacity = '0.15';
+    
+    // Quantum wires
+    const wire1 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    wire1.setAttribute('x1', '50');
+    wire1.setAttribute('y1', '80');
+    wire1.setAttribute('x2', '1150');
+    wire1.setAttribute('y2', '80');
+    wire1.setAttribute('stroke', '#2ec4b6');
+    wire1.setAttribute('stroke-width', '2');
+    circuitSvg.appendChild(wire1);
+    
+    const wire2 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    wire2.setAttribute('x1', '50');
+    wire2.setAttribute('y1', '180');
+    wire2.setAttribute('x2', '1150');
+    wire2.setAttribute('y2', '180');
+    wire2.setAttribute('stroke', '#2ec4b6');
+    wire2.setAttribute('stroke-width', '2');
+    circuitSvg.appendChild(wire2);
+    
+    // Input labels
+    const input1 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    input1.setAttribute('x', '20');
+    input1.setAttribute('y', '85');
+    input1.setAttribute('fill', '#2ec4b6');
+    input1.setAttribute('font-size', '16');
+    input1.setAttribute('font-family', 'monospace');
+    input1.textContent = '|0⟩';
+    circuitSvg.appendChild(input1);
+    
+    const input2 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    input2.setAttribute('x', '20');
+    input2.setAttribute('y', '185');
+    input2.setAttribute('fill', '#2ec4b6');
+    input2.setAttribute('font-size', '16');
+    input2.setAttribute('font-family', 'monospace');
+    input2.textContent = '|0⟩';
+    circuitSvg.appendChild(input2);
+    
+    // Hadamard gate on qubit 1
+    const hadamardRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    hadamardRect.setAttribute('x', '100');
+    hadamardRect.setAttribute('y', '60');
+    hadamardRect.setAttribute('width', '40');
+    hadamardRect.setAttribute('height', '40');
+    hadamardRect.setAttribute('fill', 'none');
+    hadamardRect.setAttribute('stroke', '#2ec4b6');
+    hadamardRect.setAttribute('stroke-width', '2');
+    circuitSvg.appendChild(hadamardRect);
+    
+    const hadamardText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    hadamardText.setAttribute('x', '115');
+    hadamardText.setAttribute('y', '90');
+    hadamardText.setAttribute('fill', '#2ec4b6');
+    hadamardText.setAttribute('font-size', '20');
+    hadamardText.setAttribute('font-weight', 'bold');
+    hadamardText.setAttribute('text-anchor', 'middle');
+    hadamardText.textContent = 'H';
+    circuitSvg.appendChild(hadamardText);
+    
+    // Wire from hadamard
+    const wire3 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    wire3.setAttribute('x1', '140');
+    wire3.setAttribute('y1', '80');
+    wire3.setAttribute('x2', '200');
+    wire3.setAttribute('y2', '80');
+    wire3.setAttribute('stroke', '#2ec4b6');
+    wire3.setAttribute('stroke-width', '2');
+    circuitSvg.appendChild(wire3);
+    
+    // CNOT gate
+    // Control circle on qubit 1
+    const controlCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    controlCircle.setAttribute('cx', '230');
+    controlCircle.setAttribute('cy', '80');
+    controlCircle.setAttribute('r', '5');
+    controlCircle.setAttribute('fill', '#2ec4b6');
+    circuitSvg.appendChild(controlCircle);
+    
+    // Vertical line connecting qubits
+    const verticalLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    verticalLine.setAttribute('x1', '230');
+    verticalLine.setAttribute('y1', '80');
+    verticalLine.setAttribute('x2', '230');
+    verticalLine.setAttribute('y2', '180');
+    verticalLine.setAttribute('stroke', '#2ec4b6');
+    verticalLine.setAttribute('stroke-width', '2');
+    circuitSvg.appendChild(verticalLine);
+    
+    // Target gate (circle with cross)
+    const targetCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    targetCircle.setAttribute('cx', '230');
+    targetCircle.setAttribute('cy', '180');
+    targetCircle.setAttribute('r', '8');
+    targetCircle.setAttribute('fill', 'none');
+    targetCircle.setAttribute('stroke', '#2ec4b6');
+    targetCircle.setAttribute('stroke-width', '2');
+    circuitSvg.appendChild(targetCircle);
+    
+    const targetCrossH = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    targetCrossH.setAttribute('x1', '222');
+    targetCrossH.setAttribute('y1', '180');
+    targetCrossH.setAttribute('x2', '238');
+    targetCrossH.setAttribute('y2', '180');
+    targetCrossH.setAttribute('stroke', '#2ec4b6');
+    targetCrossH.setAttribute('stroke-width', '2');
+    circuitSvg.appendChild(targetCrossH);
+    
+    const targetCrossV = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    targetCrossV.setAttribute('x1', '230');
+    targetCrossV.setAttribute('y1', '172');
+    targetCrossV.setAttribute('x2', '230');
+    targetCrossV.setAttribute('y2', '188');
+    targetCrossV.setAttribute('stroke', '#2ec4b6');
+    targetCrossV.setAttribute('stroke-width', '2');
+    circuitSvg.appendChild(targetCrossV);
+    
+    // Wires after CNOT
+    const wire4 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    wire4.setAttribute('x1', '230');
+    wire4.setAttribute('y1', '80');
+    wire4.setAttribute('x2', '350');
+    wire4.setAttribute('y2', '80');
+    wire4.setAttribute('stroke', '#2ec4b6');
+    wire4.setAttribute('stroke-width', '2');
+    circuitSvg.appendChild(wire4);
+    
+    const wire5 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    wire5.setAttribute('x1', '230');
+    wire5.setAttribute('y1', '180');
+    wire5.setAttribute('x2', '350');
+    wire5.setAttribute('y2', '180');
+    wire5.setAttribute('stroke', '#2ec4b6');
+    wire5.setAttribute('stroke-width', '2');
+    circuitSvg.appendChild(wire5);
+    
+    // Measurement gates
+    const measurementGates = [
+      { x: '370', y: '70', wire: '80' },
+      { x: '370', y: '170', wire: '180' }
+    ];
+    
+    measurementGates.forEach(gate => {
+      const measureBox = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      measureBox.setAttribute('d', `M ${gate.x} ${gate.y} L ${parseInt(gate.x) + 35} ${gate.y} L ${parseInt(gate.x) + 35} ${parseInt(gate.y) + 35} L ${parseInt(gate.x) + 17} ${parseInt(gate.y) + 50} L ${gate.x} ${parseInt(gate.y) + 35} Z`);
+      measureBox.setAttribute('fill', 'none');
+      measureBox.setAttribute('stroke', '#a78bfa');
+      measureBox.setAttribute('stroke-width', '2');
+      circuitSvg.appendChild(measureBox);
+      
+      const measureArrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      measureArrow.setAttribute('d', `M ${parseInt(gate.x) + 17} ${parseInt(gate.y) + 25} Q ${parseInt(gate.x) + 25} ${parseInt(gate.y) + 15} ${parseInt(gate.x) + 30} ${parseInt(gate.y) + 10}`);
+      measureArrow.setAttribute('fill', 'none');
+      measureArrow.setAttribute('stroke', '#a78bfa');
+      measureArrow.setAttribute('stroke-width', '1.5');
+      circuitSvg.appendChild(measureArrow);
+    });
+    
+    // Output wires
+    const wire6 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    wire6.setAttribute('x1', '420');
+    wire6.setAttribute('y1', '80');
+    wire6.setAttribute('x2', '1150');
+    wire6.setAttribute('y2', '80');
+    wire6.setAttribute('stroke', '#2ec4b6');
+    wire6.setAttribute('stroke-width', '2');
+    circuitSvg.appendChild(wire6);
+    
+    const wire7 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    wire7.setAttribute('x1', '420');
+    wire7.setAttribute('y1', '180');
+    wire7.setAttribute('x2', '1150');
+    wire7.setAttribute('y2', '180');
+    wire7.setAttribute('stroke', '#2ec4b6');
+    wire7.setAttribute('stroke-width', '2');
+    circuitSvg.appendChild(wire7);
+    
+    // Circuit title
+    const title = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    title.setAttribute('x', '600');
+    title.setAttribute('y', '30');
+    title.setAttribute('fill', '#2ec4b6');
+    title.setAttribute('font-size', '18');
+    title.setAttribute('font-weight', 'bold');
+    title.setAttribute('text-anchor', 'middle');
+    title.setAttribute('font-family', 'Georgia, serif');
+    title.textContent = 'Bell State Circuit (Quantum Entanglement)';
+    circuitSvg.appendChild(title);
+    
+    document.body.appendChild(circuitSvg);
+  }
+
+  // ===================== ROUND MANAGEMENT FUNCTIONS =====================
+  
+  // Handle MUS round - players decide to mus or not
+  function handleMusRound(playerIndex, action, extraData = {}) {
+    console.log(`Player ${playerIndex + 1} chose: ${action}`);
+    gameState.roundActions[playerIndex] = action;
+    
+    // Show action notification
+    showActionNotification(playerIndex, action, extraData);
+    
+    if (action === 'mus') {
+      // Check if all players have chosen mus
+      const allMus = Object.keys(gameState.roundActions).length === 4 &&
+                     Object.values(gameState.roundActions).every(a => a === 'mus');
+      
+      if (allMus) {
+        // Everyone wants mus - start discard phase
+        console.log('All players chose MUS - starting discard phase');
+        startDiscardPhase();
+      } else {
+        // Move to next player
+        nextPlayer();
+        startPlayerTurnTimer(gameState.activePlayerIndex);
+      }
+    } else if (action === 'paso' || action === 'envido' || action === 'ordago') {
+      // Someone ended mus phase - move to Grande round
+      if (action === 'envido' || action === 'ordago') {
+        // Start betting
+        gameState.currentBet.betType = action;
+        gameState.currentBet.bettingTeam = getPlayerTeam(playerIndex);
+        console.log(`Betting started by team ${gameState.currentBet.bettingTeam}`);
+      }
+      gameState.musPhaseActive = false;
+      gameState.currentRound = 'GRANDE';
+      resetRoundState();
+      moveToNextRound('GRANDE');
+    }
+  }
+  
+  // Start discard phase - all players discard simultaneously
+  function startDiscardPhase() {
+    gameState.waitingForDiscard = true;
+    
+    // Show discard UI for all players
+    showDiscardUI();
+    
+    // Start all timers simultaneously (10 seconds)
+    startAllPlayersTimer(10);
+  }
+  
+  // Handle card discard
+  function handleDiscard(playerIndex, cardIndices) {
+    gameState.cardsDiscarded[playerIndex] = cardIndices;
+    
+    // Check if all players have discarded
+    if (Object.keys(gameState.cardsDiscarded).length === 4) {
+      // All players discarded - deal new cards and restart mus round
+      dealNewCards();
+      gameState.cardsDiscarded = {};
+      gameState.roundActions = {};
+      gameState.waitingForDiscard = false;
+      gameState.activePlayerIndex = gameState.manoIndex;
+      startPlayerTurnTimer(gameState.activePlayerIndex);
+    }
+  }
+  
+  // Handle betting round (Grande, Chica, Pares, Juego)
+  function handleBettingRound(playerIndex, action, betAmount = 0) {
+    console.log(`Player ${playerIndex + 1} in betting round ${gameState.currentRound}: ${action}, bet amount: ${betAmount}`);
+    console.log('Current bet state:', gameState.currentBet);
+    console.log('All responses:', gameState.currentBet.responses);
+    
+    // Show action notification
+    showActionNotification(playerIndex, action, { amount: betAmount });
+    
+    const playerTeam = getPlayerTeam(playerIndex);
+    const opponentTeam = getOpponentTeam(playerTeam);
+    
+    if (action === 'paso') {
+      // Player passes
+      gameState.currentBet.responses[playerIndex] = 'paso';
+      console.log(`Player ${playerIndex + 1} passed, responses now:`, gameState.currentBet.responses);
+      
+      // Check if there's an active bet
+      if (gameState.currentBet.bettingTeam) {
+        console.log(`Active bet from ${gameState.currentBet.bettingTeam}`);
+        // There's a bet - this player is from the opponent team responding
+        const opponentPlayers = gameState.teams[opponentTeam].players;
+        const opponentResponses = opponentPlayers.map(p => gameState.currentBet.responses[p]);
+        console.log('Opponent responses:', opponentResponses);
+        
+        if (opponentResponses.every(r => r === 'paso')) {
+          // Both opponents passed - betting team wins points
+          const points = gameState.currentBet.amount || 1;
+          gameState.teams[gameState.currentBet.bettingTeam].score += points;
+          updateScoreboard();
+          console.log(`Team ${gameState.currentBet.bettingTeam} wins ${points} points (opponents passed)`);
+          
+          // If this was ÓRDAGO that was rejected, betting team wins the game
+          if (gameState.currentBet.betType === 'ordago') {
+            console.log('ÓRDAGO rejected - betting team wins the game!');
+            setTimeout(() => {
+              showGameOver(gameState.currentBet.bettingTeam);
+            }, 2000);
+            return;
+          }
+          
+          // Check if team reached winning score
+          if (gameState.teams[gameState.currentBet.bettingTeam].score >= 40) {
+            showGameOver(gameState.currentBet.bettingTeam);
+            return;
+          }
+          
+          // Award points immediately (rejected bet)
+          setTimeout(() => {
+            moveToNextRound();
+          }, 2000);
+        } else {
+          // Move to the other opponent player who hasn't responded
+          const otherOpponent = getOtherOpponentPlayer(opponentTeam, playerIndex);
+          console.log(`Moving to other opponent player ${otherOpponent + 1}`);
+          gameState.activePlayerIndex = otherOpponent;
+          startPlayerTurnTimer(gameState.activePlayerIndex);
+        }
+      } else {
+        // No bet yet - player passes without betting
+        console.log('No active bet - player passed without betting');
+        const responseCount = Object.keys(gameState.currentBet.responses).length;
+        console.log(`${responseCount}/4 players have responded`);
+        
+        if (responseCount >= 4) {
+          // Everyone passed without betting - no points, next round
+          console.log('All 4 players passed without betting - moving to next round');
+          setTimeout(() => moveToNextRound(), 1000);
+        } else {
+          // Continue giving other players opportunity to bet
+          console.log('Moving to next player');
+          nextPlayer();
+          startPlayerTurnTimer(gameState.activePlayerIndex);
+        }
+      }
+    } else if (action === 'accept') {
+      // Accept the bet
+      console.log(`Player ${playerIndex + 1} accepted the bet`);
+      gameState.currentBet.responses[playerIndex] = 'accept';
+      
+      // Check if this is ÓRDAGO (all-in bet)
+      if (gameState.currentBet.betType === 'ordago') {
+        console.log('ÓRDAGO accepted - revealing all cards to determine game winner');
+        
+        // Reveal all cards
+        revealAllCards();
+        
+        setTimeout(() => {
+          // Determine winner of this round
+          const roundWinner = calculateRoundWinner();
+          console.log(`Round winner: ${roundWinner}`);
+          
+          // Winner of the round wins the game
+          showGameOver(roundWinner);
+        }, 2000);
+      } else {
+        // Normal bet - award points to betting team and move to next round
+        const points = gameState.currentBet.amount || 1;
+        gameState.teams[gameState.currentBet.bettingTeam].score += points;
+        updateScoreboard();
+        console.log(`Team ${gameState.currentBet.bettingTeam} wins ${points} points (bet accepted)`);
+        
+        // Check if team reached winning score (40 points)
+        if (gameState.teams[gameState.currentBet.bettingTeam].score >= 40) {
+          showGameOver(gameState.currentBet.bettingTeam);
+          return;
+        }
+        
+        // Show result and move to next round
+        showRoundResult(gameState.currentBet.bettingTeam, points);
+        setTimeout(() => {
+          moveToNextRound();
+        }, 2000);
+      }
+    } else if (action === 'envido' || action === 'raise') {
+      // Make a bet or raise
+      console.log(`Player ${playerIndex + 1} makes/raises bet to ${betAmount}`);
+      
+      // If this is a counter-raise (there was already a bet from the other team)
+      const isCounterRaise = gameState.currentBet.bettingTeam && gameState.currentBet.bettingTeam !== playerTeam;
+      
+      gameState.currentBet.amount = betAmount;
+      gameState.currentBet.bettingTeam = playerTeam;
+      gameState.currentBet.betType = 'envido';
+      gameState.currentBet.responses = {}; // Reset responses for new bet
+      
+      // Opponent team must respond
+      // Find next opponent player counter-clockwise
+      const nextOpponent = getNextOpponentPlayer(playerIndex, opponentTeam);
+      console.log(`Bet ${isCounterRaise ? 'raised' : 'made'}, next opponent to respond: Player ${nextOpponent + 1}`);
+      gameState.activePlayerIndex = nextOpponent;
+      startPlayerTurnTimer(gameState.activePlayerIndex);
+      updateScoreboard(); // Update buttons to show Quiero/No Quiero
+    } else if (action === 'ordago') {
+      // All-in bet
+      console.log(`Player ${playerIndex + 1} declares ORDAGO!`);
+      gameState.currentBet.betType = 'ordago';
+      gameState.currentBet.bettingTeam = playerTeam;
+      gameState.currentBet.amount = 40; // Ordago is worth all points
+      gameState.currentBet.responses = {};
+      
+      // Opponent team must respond
+      const nextOpponent = getNextOpponentPlayer(playerIndex, opponentTeam);
+      console.log(`ÓRDAGO declared, next opponent to respond: Player ${nextOpponent + 1}`);
+      gameState.activePlayerIndex = nextOpponent;
+      startPlayerTurnTimer(gameState.activePlayerIndex);
+      updateScoreboard(); // Update buttons to show Quiero/No Quiero
+    }
+  }
+  
+  // Move to the next round
+  function moveToNextRound(forcedRound = null) {
+    const roundOrder = ['MUS', 'GRANDE', 'CHICA', 'PARES', 'JUEGO'];
+    
+    if (forcedRound) {
+      gameState.currentRound = forcedRound;
+    } else {
+      const currentIndex = roundOrder.indexOf(gameState.currentRound);
+      if (currentIndex < roundOrder.length - 1) {
+        gameState.currentRound = roundOrder[currentIndex + 1];
+      } else {
+        // End of all rounds - reveal and count all points
+        finishHand();
+        return;
+      }
+    }
+    
+    resetRoundState();
+    
+    // Start the new round with mano
+    gameState.activePlayerIndex = gameState.manoIndex;
+    updateRoundDisplay();
+    
+    // For PARES and JUEGO, start declaration phase
+    if (gameState.currentRound === 'PARES') {
+      startParesDeclaration();
+    } else if (gameState.currentRound === 'JUEGO') {
+      startJuegoDeclaration();
+    } else {
+      startPlayerTurnTimer(gameState.activePlayerIndex);
+    }
+  }
+  
+  // Reveal cards and score the round
+  function revealAndScoreRound() {
+    // Calculate winner based on current round type
+    const winner = calculateRoundWinner();
+    const points = gameState.currentBet.amount || 1;
+    
+    // Store points as pending - they will be awarded at hand end
+    // Exception: Points are awarded immediately for rejected bets and ordago (handled elsewhere)
+    if (gameState.currentRound !== 'MUS') {
+      gameState.pendingPoints[winner][gameState.currentRound] = points;
+      console.log(`Storing ${points} pending points for ${winner} in ${gameState.currentRound}`);
+    }
+    
+    // Show result modal
+    showRoundResult(winner, points);
+    
+    // Move to next round after delay
+    setTimeout(() => {
+      moveToNextRound();
+    }, 3000);
+  }
+  
+  // Calculate round winner based on card values
+  function calculateRoundWinner() {
+    // Get all players' cards
+    const hands = {};
+    for (let i = 0; i < 4; i++) {
+      hands[i] = getPlayerCards(i);
+    }
+    
+    let winningTeam = 'team1';
+    
+    if (gameState.currentRound === 'GRANDE') {
+      // Higher cards win
+      winningTeam = compareHighCards(hands);
+    } else if (gameState.currentRound === 'CHICA') {
+      // Lower cards win
+      winningTeam = compareLowCards(hands);
+    }
+    
+    return winningTeam;
+  }
+  
+  // Compare hands for Grande (higher cards)
+  function compareHighCards(hands) {
+    // Card order for 8 reyes: K(or 3) > Q > J > 7 > 6 > 5 > 4 > 3 > 1(or 2)
+    const gameMode = window.currentGameMode || '4';
+    const cardOrder = gameMode === '8' 
+      ? ['K', '3', 'Q', 'J', '7', '6', '5', '4', 'A', '2']
+      : ['K', 'Q', 'J', '7', '6', '5', '4', '3', '2', 'A'];
+    
+    // Compare team hands
+    const team1Best = Math.max(...[hands[0], hands[2]].map(h => getHandValue(h, cardOrder)));
+    const team2Best = Math.max(...[hands[1], hands[3]].map(h => getHandValue(h, cardOrder)));
+    
+    return team1Best >= team2Best ? 'team1' : 'team2';
+  }
+  
+  // Compare hands for Chica (lower cards)
+  function compareLowCards(hands) {
+    const gameMode = window.currentGameMode || '4';
+    const cardOrder = gameMode === '8' 
+      ? ['K', '3', 'Q', 'J', '7', '6', '5', '4', 'A', '2']
+      : ['K', 'Q', 'J', '7', '6', '5', '4', '3', '2', 'A'];
+    
+    // For Chica, reverse the order (lower is better)
+    const team1Best = Math.min(...[hands[0], hands[2]].map(h => getHandValue(h, cardOrder)));
+    const team2Best = Math.min(...[hands[1], hands[3]].map(h => getHandValue(h, cardOrder)));
+    
+    return team1Best <= team2Best ? 'team1' : 'team2';
+  }
+  
+  // Get hand value for comparison
+  function getHandValue(hand, cardOrder) {
+    // Find highest card in hand
+    let bestValue = -1;
+    hand.forEach(card => {
+      const index = cardOrder.indexOf(card.value);
+      if (index !== -1) {
+        bestValue = Math.max(bestValue, cardOrder.length - index);
+      }
+    });
+    return bestValue;
+  }
+  
+  // Get player's current cards
+  function getPlayerCards(playerIndex) {
+    const playerId = `player${playerIndex + 1}`;
+    const cards = document.querySelectorAll(`#${playerId}-zone .quantum-card`);
+    return Array.from(cards).map(card => ({
+      value: card.dataset.mainValue || card.dataset.value,
+      suit: card.dataset.suit
+    }));
+  }
+  
+  // ===================== PARES ROUND =====================
+  
+  function startParesDeclaration() {
+    console.log('Starting PARES declaration');
+    gameState.paresDeclarations = {};
+    gameState.activePlayerIndex = gameState.manoIndex;
+    startPlayerTurnTimer(gameState.activePlayerIndex);
+  }
+  
+  function handleParesDeclaration(playerIndex, hasPares) {
+    gameState.paresDeclarations[playerIndex] = hasPares;
+    showActionNotification(playerIndex, hasPares ? 'pares' : 'no_pares');
+    
+    // Check if all players declared
+    if (Object.keys(gameState.paresDeclarations).length === 4) {
+      // Check if at least one from each team has pares
+      const team1HasPares = gameState.teams.team1.players.some(p => gameState.paresDeclarations[p]);
+      const team2HasPares = gameState.teams.team2.players.some(p => gameState.paresDeclarations[p]);
+      
+      if (team1HasPares && team2HasPares) {
+        // Start betting from mano
+        gameState.activePlayerIndex = gameState.manoIndex;
+        gameState.currentBet.bettingTeam = null;
+        startPlayerTurnTimer(gameState.activePlayerIndex);
+      } else {
+        // No betting, move to next round
+        if (team1HasPares || team2HasPares) {
+          // Only one team has pares, they get 1 point
+          const winningTeam = team1HasPares ? 'team1' : 'team2';
+          gameState.teams[winningTeam].score += 1;
+          updateScoreboard();
+          showRoundResult(winningTeam, 1);
+        }
+        setTimeout(() => moveToNextRound(), 2000);
+      }
+    } else {
+      // Move to next player
+      nextPlayer();
+      startPlayerTurnTimer(gameState.activePlayerIndex);
+    }
+  }
+  
+  function calculatePares(cards) {
+    const gameMode = window.currentGameMode || '4';
+    // Normalize values for comparison
+    const normalizeValue = (val) => {
+      if (gameMode === '8') {
+        if (val === 'A') return '2';
+        if (val === '3') return 'K';
+      }
+      return val;
+    };
+    
+    const valueCounts = {};
+    cards.forEach(card => {
+      const normalized = normalizeValue(card.value);
+      valueCounts[normalized] = (valueCounts[normalized] || 0) + 1;
+    });
+    
+    // Check for pairs, triplets, double pairs
+    const counts = Object.values(valueCounts).sort((a, b) => b - a);
+    const values = Object.keys(valueCounts);
+    
+    if (counts[0] === 3) {
+      // Triplet
+      const tripletValue = values.find(v => valueCounts[v] === 3);
+      return { type: 'triplet', value: tripletValue, rank: 2 };
+    } else if (counts[0] === 2 && counts[1] === 2) {
+      // Double pair
+      const pairValues = values.filter(v => valueCounts[v] === 2).sort((a, b) => {
+        const order = gameMode === '8' ? ['A', '2', '4', '5', '6', '7', 'J', 'Q', 'K'] : ['A', '2', '3', '4', '5', '6', '7', 'J', 'Q', 'K'];
+        return order.indexOf(b) - order.indexOf(a);
+      });
+      return { type: 'double_pair', value: pairValues[0], rank: 3 };
+    } else if (counts[0] === 2) {
+      // Single pair
+      const pairValue = values.find(v => valueCounts[v] === 2);
+      return { type: 'pair', value: pairValue, rank: 1 };
+    }
+    
+    return null;
+  }
+  
+  // ===================== JUEGO ROUND =====================
+  
+  function startJuegoDeclaration() {
+    console.log('Starting JUEGO declaration');
+    gameState.juegoDeclarations = {};
+    gameState.activePlayerIndex = gameState.manoIndex;
+    startPlayerTurnTimer(gameState.activePlayerIndex);
+  }
+  
+  function handleJuegoDeclaration(playerIndex, hasJuego) {
+    gameState.juegoDeclarations[playerIndex] = hasJuego;
+    showActionNotification(playerIndex, hasJuego ? 'juego' : 'no_juego');
+    
+    // Check if all players declared
+    if (Object.keys(gameState.juegoDeclarations).length === 4) {
+      // Check if at least one from each team has juego
+      const team1HasJuego = gameState.teams.team1.players.some(p => gameState.juegoDeclarations[p]);
+      const team2HasJuego = gameState.teams.team2.players.some(p => gameState.juegoDeclarations[p]);
+      
+      if (team1HasJuego && team2HasJuego) {
+        // Start betting from mano (both teams have juego >= 31)
+        gameState.activePlayerIndex = gameState.manoIndex;
+        gameState.currentBet.bettingTeam = null;
+        startPlayerTurnTimer(gameState.activePlayerIndex);
+      } else if (!team1HasJuego && !team2HasJuego) {
+        // No one has juego, bet on best count (punto)
+        gameState.activePlayerIndex = gameState.manoIndex;
+        gameState.currentBet.bettingTeam = null;
+        startPlayerTurnTimer(gameState.activePlayerIndex);
+      } else {
+        // Only one team has juego, they get 1 point
+        const winningTeam = team1HasJuego ? 'team1' : 'team2';
+        gameState.teams[winningTeam].score += 1;
+        updateScoreboard();
+        showRoundResult(winningTeam, 1);
+        setTimeout(() => moveToNextRound(), 2000);
+      }
+    } else {
+      // Move to next player
+      nextPlayer();
+      startPlayerTurnTimer(gameState.activePlayerIndex);
+    }
+  }
+  
+  function calculateJuego(cards) {
+    const gameMode = window.currentGameMode || '4';
+    const getCardPoints = (val) => {
+      if (val === 'A') return 1;
+      if (val === '2') return 1;
+      if (val === '3') return gameMode === '4' ? 3 : 10;
+      if (val === 'J') return 10;
+      if (val === 'Q') return 10;
+      if (val === 'K') return 10;
+      return parseInt(val) || 0;
+    };
+    
+    const sum = cards.reduce((acc, card) => acc + getCardPoints(card.value), 0);
+    
+    return {
+      sum: sum,
+      hasJuego: sum >= 31,
+      rank: sum >= 31 ? (sum === 31 ? 100 : (sum === 40 ? 99 : (100 - sum + 31))) : (30 - sum)
+    };
+  }
+  
+  // Finish hand - reveal all cards and award points
+  function finishHand() {
+    console.log('Finishing hand - revealing all cards');
+    
+    // Reveal all cards
+    revealAllCards();
+    
+    // Award all pending points
+    setTimeout(() => {
+      const roundOrder = ['GRANDE', 'CHICA', 'PARES', 'JUEGO'];
+      
+      // Process pending points for each round
+      roundOrder.forEach(round => {
+        ['team1', 'team2'].forEach(team => {
+          const points = gameState.pendingPoints[team][round];
+          if (points > 0) {
+            gameState.teams[team].score += points;
+            console.log(`Awarding ${points} points to ${team} for ${round} round`);
+          }
+        });
+      });
+      
+      // Update scoreboard with final scores
+      updateScoreboard();
+      
+      // Check if any team reached winning score
+      if (gameState.teams.team1.score >= 40) {
+        showGameOver('team1');
+        return;
+      } else if (gameState.teams.team2.score >= 40) {
+        showGameOver('team2');
+        return;
+      }
+      
+      // Reset pending points for next hand
+      gameState.pendingPoints = {
+        team1: { GRANDE: 0, CHICA: 0, PARES: 0, JUEGO: 0 },
+        team2: { GRANDE: 0, CHICA: 0, PARES: 0, JUEGO: 0 }
+      };
+      
+      showHandSummary();
+      
+      setTimeout(() => {
+        startNewHand();
+      }, 5000);
+    }, 3000);
+  }
+  
+  function revealAllCards() {
+    // Show all player cards
+    for (let i = 0; i < 4; i++) {
+      const playerId = `player${i + 1}`;
+      const cards = document.querySelectorAll(`#${playerId}-zone .quantum-card`);
+      
+      cards.forEach(card => {
+        // Remove hidden symbol and show actual cards
+        const hiddenSymbol = card.querySelector('.hidden-card-symbol, .hidden-symbol-right, .hidden-symbol-left');
+        if (hiddenSymbol) {
+          hiddenSymbol.remove();
+          
+          // Add visible card content
+          const value = card.dataset.mainValue || card.dataset.value;
+          const suitColor = card.dataset.suitColor || '#2ec4b6';
+          
+          const topLabel = document.createElement('div');
+          topLabel.className = 'dirac-label card-top';
+          topLabel.style.color = suitColor;
+          topLabel.innerHTML = `|${value}⟩`;
+          card.appendChild(topLabel);
+          
+          const bottomLabel = document.createElement('div');
+          bottomLabel.className = 'dirac-label card-bottom';
+          bottomLabel.style.color = suitColor;
+          const partner = card.dataset.partner || card.dataset.superposedValue || value;
+          bottomLabel.innerHTML = `⟨${partner}|`;
+          card.appendChild(bottomLabel);
+        }
+      });
+    }
+  }
+  
+  function showHandSummary() {
+    const team1Score = gameState.teams.team1.score;
+    const team2Score = gameState.teams.team2.score;
+    
+    const modal = createModal('#a78bfa');
+    modal.innerHTML = `
+      <div class="modal-content" style="
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98));
+        border: 3px solid #a78bfa; border-radius: 25px; padding: 45px; text-align: center;
+        box-shadow: 0 15px 50px rgba(0, 0, 0, 0.5), 0 0 30px rgba(167, 139, 250, 0.4);
+        max-width: 550px; transform: scale(0.8); transition: transform 0.3s;
+      ">
+        <h2 style="color: #a78bfa; font-size: 2.2rem; margin-bottom: 20px; font-weight: 300; letter-spacing: 4px;">
+          MANO COMPLETADA
+        </h2>
+        <div style="display: flex; justify-content: space-around; margin: 30px 0;">
+          <div>
+            <p style="color: #2ec4b6; font-size: 1rem;">Copenhague</p>
+            <p style="color: #2ec4b6; font-size: 2.5rem; font-weight: bold;">${team1Score}</p>
+          </div>
+          <div>
+            <p style="color: #ff9e6d; font-size: 1rem;">Bohmian</p>
+            <p style="color: #ff9e6d; font-size: 2.5rem; font-weight: bold;">${team2Score}</p>
+          </div>
+        </div>
+        <p style="color: var(--circuit-blueprint); font-size: 1rem;">
+          Nueva mano comenzará pronto...
+        </p>
+      </div>
+    `;
+    
+    document.body.appendChild(modal);
+    animateModal(modal);
+    
+    setTimeout(() => {
+      closeModal(modal);
+    }, 4500);
+  }
+  
+  // Start new hand
+  function startNewHand() {
+    // Reset game state
+    gameState.currentRound = 'MUS';
+    gameState.musPhaseActive = true;
+    gameState.manoIndex = (gameState.manoIndex + 1) % 4;
+    gameState.activePlayerIndex = gameState.manoIndex;
+    resetRoundState();
+    
+    // Deal new cards to all players
+    playDealAnimation();
+    
+    setTimeout(() => {
+      startPlayerTurnTimer(gameState.activePlayerIndex);
+    }, 2000);
+  }
+
+  // Show game over panel with winner
+  function showGameOver(winningTeam) {
+    console.log(`Game Over! Winner: ${winningTeam}`);
+    
+    const team1Score = gameState.teams.team1.score;
+    const team2Score = gameState.teams.team2.score;
+    const winnerName = winningTeam === 'team1' ? gameState.teams.team1.name : gameState.teams.team2.name;
+    const winnerScore = winningTeam === 'team1' ? team1Score : team2Score;
+    const loserScore = winningTeam === 'team1' ? team2Score : team1Score;
+    
+    const gameOverModal = document.createElement('div');
+    gameOverModal.className = 'game-over-modal';
+    gameOverModal.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(15, 23, 42, 0.98);
+      backdrop-filter: blur(10px);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 10000;
+      opacity: 0;
+      transition: opacity 0.5s;
+    `;
+    
+    const winnerColor = winningTeam === 'team1' ? '#2ec4b6' : '#ff9e6d';
+    
+    gameOverModal.innerHTML = `
+      <div style="
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98));
+        border: 4px solid ${winnerColor};
+        border-radius: 30px;
+        padding: 60px;
+        text-align: center;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), 0 0 40px ${winnerColor}80;
+        max-width: 700px;
+        transform: scale(0.8);
+        transition: transform 0.5s;
+      ">
+        <div style="font-size: 6rem; margin-bottom: 20px; filter: drop-shadow(0 0 20px ${winnerColor});">🏆</div>
+        <h1 style="
+          color: ${winnerColor};
+          font-size: 3.5rem;
+          margin-bottom: 20px;
+          font-weight: 300;
+          letter-spacing: 8px;
+          text-shadow: 0 0 30px ${winnerColor}80;
+        ">¡VICTORIA!</h1>
+        <h2 style="
+          color: var(--paper-beige);
+          font-size: 2.5rem;
+          margin-bottom: 30px;
+          font-weight: 400;
+        ">${winnerName}</h2>
+        <div style="
+          display: flex;
+          justify-content: center;
+          gap: 60px;
+          margin: 40px 0;
+          font-size: 1.5rem;
+        ">
+          <div style="color: var(--paper-beige);">
+            <div style="color: ${winnerColor}; font-size: 3rem; font-weight: bold; margin-bottom: 10px;">${winnerScore}</div>
+            <div>${winnerName}</div>
+          </div>
+          <div style="color: var(--circuit-blueprint); font-size: 3rem; align-self: center;">-</div>
+          <div style="color: var(--paper-beige);">
+            <div style="font-size: 3rem; font-weight: bold; margin-bottom: 10px; opacity: 0.6;">${loserScore}</div>
+            <div style="opacity: 0.6;">${winningTeam === 'team1' ? gameState.teams.team2.name : gameState.teams.team1.name}</div>
+          </div>
+        </div>
+        <button id="exit-game-btn" style="
+          background: linear-gradient(135deg, ${winnerColor}, ${winnerColor}90);
+          color: white;
+          border: none;
+          padding: 18px 50px;
+          border-radius: 30px;
+          font-size: 1.3rem;
+          cursor: pointer;
+          font-weight: bold;
+          letter-spacing: 3px;
+          box-shadow: 0 8px 25px ${winnerColor}99;
+          transition: all 0.3s;
+          margin-top: 20px;
+        ">SALIR AL LOBBY</button>
+      </div>
+    `;
+    
+    document.body.appendChild(gameOverModal);
+    
+    // Animate in
+    setTimeout(() => {
+      gameOverModal.style.opacity = '1';
+      const content = gameOverModal.querySelector('div');
+      if (content) content.style.transform = 'scale(1)';
+    }, 10);
+    
+    // Exit button functionality
+    const exitBtn = gameOverModal.querySelector('#exit-game-btn');
+    exitBtn.addEventListener('mouseenter', () => {
+      exitBtn.style.transform = 'scale(1.05)';
+      exitBtn.style.boxShadow = `0 12px 35px ${winnerColor}`;
+    });
+    exitBtn.addEventListener('mouseleave', () => {
+      exitBtn.style.transform = 'scale(1)';
+      exitBtn.style.boxShadow = `0 8px 25px ${winnerColor}99`;
+    });
+    exitBtn.addEventListener('click', () => {
+      // Return to lobby
+      window.location.reload();
+    });
+  }
+  
+  // Update scoreboard with current round
+  function updateRoundDisplay() {
+    const roundElement = document.querySelector('.stat-value');
+    if (roundElement) {
+      roundElement.textContent = gameState.currentRound;
+    }
+  }
+
+  function createPlayerZone(player, index, gameMode) {
+    const zone = document.createElement('div');
+    zone.className = 'player-zone';
+    zone.id = `${player.id}-zone`;
+    const isCurrentPlayer = player.id === 'player1';
+    const displayName = player.playerName ? ` (${player.playerName})` : '';
+
+    // Determine who starts (mano) - randomly select one player on first initialization
+    if (!window.startingPlayer) {
+      window.startingPlayer = `player${Math.floor(Math.random() * 4) + 1}`;
+    }
+    const isMano = player.id === window.startingPlayer;
+
+    // Character Avatar
+    const avatar = document.createElement('div');
+    avatar.className = `character-avatar ${player.character}`;
+    avatar.style.cursor = 'pointer';
+    avatar.style.position = 'relative';
+    
+    // Character descriptions
+    const characterDescriptions = {
+      'Preskill': '<strong>John Preskill (1961-presente)</strong><br><br>Pionero teórico en información cuántica e informática cuántica. Preskill es el Profesor Richard P. Feynman de Física Teórica en Caltech y una autoridad destacada en corrección de errores cuánticos y el camino hacia computadoras cuánticas prácticas.<br><br><strong>Símbolo de la Carta:</strong> El código de corrección de errores (círculos anidados) representa códigos de corrección de errores cuánticos - mecanismos esenciales que protegen la información cuántica de la decoherencia y el ruido ambiental, haciendo posibles computadoras cuánticas confiables.<br><br><strong>Contribución:</strong> Desarrolló marcos fundamentales para corrección de errores cuánticos, estableció el concepto de era "NISQ" (Noisy Intermediate-Scale Quantum), y continúa guiando la realización práctica de computadoras cuánticas en el mundo real.',
+      'Cirac': '<strong>Ignacio Cirac (1965-presente)</strong><br><br>Científico de información cuántica líder que revolucionó la teoría de la informática cuántica. Cirac es reconocido por desarrollar protocolos de simulación cuántica y demostrar cómo construir computadoras cuánticas usando iones atrapados.<br><br><strong>Símbolo de la Carta:</strong> La representación de trampa de iones (tres puntos dispuestos en un patrón) simboliza iones atrapados dispuestos en una configuración lineal - los componentes fundamentales para la computación cuántica en su enfoque.<br><br><strong>Contribución:</strong> Su trabajo sobre entrelazamiento cuántico y sistemas de muchos cuerpos creó el fundamento teórico para computadoras y simuladores cuánticos modernos.',
+      'Zoller': '<strong>Peter Zoller (1952-presente)</strong><br><br>Distinguido físico cuántico especializado en computación cuántica con iones atrapados. Zoller desarrolló protocolos detallados para manipular y medir estados cuánticos usando iones enfriados por láser.<br><br><strong>Símbolo de la Carta:</strong> La celosía cuántica (puntos interconectados) representa la disposición geométrica de iones atrapados en una computadora cuántica, mostrando cómo los bits cuánticos individuales se comunican e se enredan entre sí.<br><br><strong>Contribución:</strong> Sus protocolos transformaron sistemas de iones atrapados en computadoras cuánticas prácticas, proporcionando instrucciones paso a paso para operaciones de puertas cuánticas que se implementan en el hardware cuántico actual.',
+      'Deutsch': '<strong>David Deutsch (1953-presente)</strong><br><br>Fundador de la teoría de la computación cuántica - el primero en reconocer que las computadoras cuánticas podrían resolver problemas exponencialmente más rápido que las computadoras clásicas. Su trabajo revolucionario estableció algoritmos cuánticos como un nuevo paradigma computacional.<br><br><strong>Símbolo de la Carta:</strong> La representación de circuito cuántico (caja con círculo y punto) simboliza una puerta cuántica - las operaciones computacionales fundamentales que manipulan bits cuánticos y forman la base de algoritmos cuánticos.<br><br><strong>Contribución:</strong> Probó que el principio Church-Turing se extiende a la mecánica cuántica y creó el algoritmo de Deutsch, el primer algoritmo cuántico que demuestra ventaja computacional sobre métodos clásicos.'
+    };
+    
+    avatar.innerHTML = `
+      <div class="character-portrait">
+        ${CardGenerator.generateCharacter(player.name)}
+      </div>
+      <div class="character-name" style="color: var(--quantum-${getCharacterColor(player.character)})">
+        ${player.name}${displayName}
+      </div>
+      <div class="character-score" style="color: var(--quantum-${getCharacterColor(player.character)})" data-score="0">
+        (0)
+      </div>
+      ${isMano ? `<div class="atom-indicator" title="Mano - Comienza el juego">${CardGenerator.generateAtomIndicator(getCharacterColorValue(player.character))}</div>` : ''}
+    `;
+    
+    // Add click event for character description
+    avatar.addEventListener('click', () => {
+      showCharacterModal(player.name, characterDescriptions[player.name]);
+    });
+
+    // Hand Container
+    const handContainer = document.createElement('div');
+    handContainer.className = 'hand-container';
+
+    // Card data - Spanish deck values
+    const cardValues = ['A', '2', '3', '4', '5', '6', '7', 'J', 'Q', 'K'];
+    const suits = ['psi', 'phi', 'delta', 'theta'];
+    const suitSymbols = ['ψ', 'φ', 'δ', 'θ'];
+    const suitColors = ['#2ec4b6', '#a78bfa', '#ff9e6d', '#f5c518'];
+
+    const isTeammate = index === 2;
+
+
+    // Timer bar (inside hand container so it aligns with cards)
+    const timerBar = document.createElement('div');
+    timerBar.className = `timer-bar timer-bar-player${index+1}`;
+    timerBar.id = `timer-bar-player${index+1}`;
+    const timerFill = document.createElement('div');
+    timerFill.className = 'timer-bar-fill';
+    timerFill.style.width = '0%';
+    timerBar.appendChild(timerFill);
+
+
+    const cardsRow = document.createElement('div');
+    cardsRow.className = 'cards-row';
+    for (let i = 0; i < 4; i++) {
+      const card = createCard(cardValues[i], suits[i], suitSymbols[i], i, isCurrentPlayer, isTeammate, suitColors[i], index, gameMode);
+      cardsRow.appendChild(card);
+    }
+
+    // Add avatar and hand based on player position
+    if (player.id === 'player1') {
+      // Bottom: timer above cards
+      handContainer.appendChild(timerBar);
+      handContainer.appendChild(cardsRow);
+      zone.appendChild(handContainer);
+      zone.appendChild(avatar);
+    } else if (player.id === 'player2') {
+      // Right: timer above cards, avatar towards center
+      handContainer.appendChild(timerBar);
+      handContainer.appendChild(cardsRow);
+      zone.appendChild(avatar);
+      zone.appendChild(handContainer);
+    } else if (player.id === 'player3') {
+      // Top: cards, then timer (timer closer to scoreboard)
+      handContainer.appendChild(cardsRow);
+      handContainer.appendChild(timerBar);
+      zone.appendChild(avatar);
+      zone.appendChild(handContainer);
+    } else if (player.id === 'player4') {
+      // Left: cards, then timer, then avatar (so timer is between bottom card stack and character)
+      handContainer.appendChild(cardsRow);
+      handContainer.appendChild(timerBar);
+      zone.appendChild(handContainer);
+      zone.appendChild(avatar);
+    }
+
+    gameContainer.appendChild(zone);
+  }
+
+  // TIMER LOGIC
+  let activePlayerIndex = 0;
+  let timerInterval = null;
+
+  function startPlayerTimer(index) {
+    // Reset all timer fills
+    for (let i = 0; i < 4; i++) {
+      const fill = document.querySelector(`#timer-bar-player${i + 1} .timer-bar-fill`);
+      if (fill) {
+        fill.style.transition = 'none';
+        fill.style.width = '0%';
+      }
+    }
+
+    const fill = document.querySelector(`#timer-bar-player${index + 1} .timer-bar-fill`);
+    if (!fill) return;
+
+    // All timers behave the same: horizontal bar shrinking from full to empty
+    fill.style.width = '100%';
+    requestAnimationFrame(() => {
+      fill.style.transition = 'width 10s linear';
+      fill.style.width = '0%';
+    });
+
+    if (timerInterval) clearTimeout(timerInterval);
+    timerInterval = setTimeout(() => {
+      // Rotate turns counterclockwise around the table
+      activePlayerIndex = (activePlayerIndex + 3) % 4; // equivalent to -1 mod 4
+      startPlayerTimer(activePlayerIndex);
+    }, 10000);
+  }
+
+  window.startPlayerTimer = startPlayerTimer;
+  // Start timer at mano after deal animation
+  setTimeout(() => {
+    let manoIndex = 0;
+    for (let i = 0; i < 4; i++) {
+      if (window.startingPlayer === `player${i+1}`) manoIndex = i;
+    }
+    activePlayerIndex = manoIndex;
+    gameState.manoIndex = manoIndex;
+    gameState.activePlayerIndex = manoIndex;
+    startPlayerTimer(activePlayerIndex);
+  }, 2000);
+
+  // ===================== TIMER AND UI MANAGEMENT =====================
+  
+  // Start timer for a single player with callback on timeout
+  function startPlayerTurnTimer(index, duration = 10, onTimeout = null) {
+    console.log(`Starting turn for player ${index + 1}, Round: ${gameState.currentRound}`);
+    
+    // Update visual feedback for active player
+    updateActivePlayerHighlight(index);
+    
+    // Reset all timer fills
+    for (let i = 0; i < 4; i++) {
+      const fill = document.querySelector(`#timer-bar-player${i + 1} .timer-bar-fill`);
+      if (fill) {
+        fill.style.transition = 'none';
+        fill.style.width = '0%';
+      }
+    }
+
+    const fill = document.querySelector(`#timer-bar-player${index + 1} .timer-bar-fill`);
+    if (!fill) return;
+
+    fill.style.width = '100%';
+    requestAnimationFrame(() => {
+      fill.style.transition = `width ${duration}s linear`;
+      fill.style.width = '0%';
+    });
+
+    if (timerInterval) clearTimeout(timerInterval);
+    timerInterval = setTimeout(() => {
+      // Timeout - auto action
+      if (onTimeout) {
+        onTimeout();
+      } else {
+        handleTimeout(index);
+      }
+    }, duration * 1000);
+    
+    // If AI player, make decision
+    if (index !== 0) {
+      makeAIDecision(index);
+    }
+  }
+  
+  // Update visual highlight for active player
+  function updateActivePlayerHighlight(index) {
+    // Remove highlight from all players
+    for (let i = 0; i < 4; i++) {
+      const zone = document.querySelector(`#player${i + 1}-zone`);
+      if (zone) {
+        zone.style.boxShadow = '';
+      }
+    }
+    
+    // Add highlight to active player
+    const activeZone = document.querySelector(`#player${index + 1}-zone`);
+    if (activeZone) {
+      const colors = ['#2ec4b6', '#ff9e6d', '#a78bfa', '#f5c518'];
+      activeZone.style.boxShadow = `0 0 30px ${colors[index]}`;
+      activeZone.style.transition = 'box-shadow 0.3s';
+    }
+    
+    // Update button states (only enable for local player)
+    updateButtonStates(index === 0);
+  }
+  
+  // Enable/disable buttons based on whose turn it is
+  function updateButtonStates(isLocalPlayerTurn) {
+    const buttons = document.querySelectorAll('.quantum-gate');
+    buttons.forEach(btn => {
+      if (isLocalPlayerTurn) {
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+        btn.style.pointerEvents = 'auto';
+      } else {
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+        btn.style.pointerEvents = 'none';
+      }
+    });
+  }
+  
+  // Start all players' timers simultaneously
+  function startAllPlayersTimer(duration = 10) {
+    for (let i = 0; i < 4; i++) {
+      const fill = document.querySelector(`#timer-bar-player${i + 1} .timer-bar-fill`);
+      if (fill) {
+        fill.style.transition = 'none';
+        fill.style.width = '0%';
+        
+        requestAnimationFrame(() => {
+          fill.style.width = '100%';
+          requestAnimationFrame(() => {
+            fill.style.transition = `width ${duration}s linear`;
+            fill.style.width = '0%';
+          });
+        });
+      }
+    }
+    
+    if (timerInterval) clearTimeout(timerInterval);
+    timerInterval = setTimeout(() => {
+      // All timers expired - auto discard all cards for players who haven't acted
+      handleAllPlayersTimeout();
+    }, duration * 1000);
+  }
+  
+  // Handle timeout for a player
+  function handleTimeout(playerIndex) {
+    console.log(`Timeout for player ${playerIndex + 1}`);
+    
+    if (gameState.waitingForDiscard) {
+      // Auto discard all cards
+      handleDiscard(playerIndex, [0, 1, 2, 3]);
+    } else if (gameState.currentRound === 'MUS') {
+      // Auto mus
+      handleMusRound(playerIndex, 'mus');
+    } else {
+      // Auto paso in betting rounds
+      handleBettingRound(playerIndex, 'paso');
+    }
+  }
+  
+  // AI player decision making
+  function makeAIDecision(playerIndex) {
+    console.log(`AI making decision for player ${playerIndex + 1}`);
+    
+    setTimeout(() => {
+      if (gameState.waitingForDiscard) {
+        // AI discards 0-2 cards randomly
+        const numToDiscard = Math.floor(Math.random() * 3);
+        const cardsToDiscard = [];
+        for (let i = 0; i < numToDiscard; i++) {
+          cardsToDiscard.push(Math.floor(Math.random() * 4));
+        }
+        handleDiscard(playerIndex, cardsToDiscard);
+      } else if (gameState.currentRound === 'MUS') {
+        // 50% chance to say mus, 30% paso, 20% envido
+        const rand = Math.random();
+        if (rand < 0.5) {
+          handleMusRound(playerIndex, 'mus');
+        } else if (rand < 0.8) {
+          handleMusRound(playerIndex, 'paso');
+        } else {
+          const betAmount = 2 + Math.floor(Math.random() * 10) * 2; // 2, 4, 6...20
+          gameState.currentBet.amount = betAmount;
+          handleMusRound(playerIndex, 'envido', { amount: betAmount });
+        }
+      } else if (gameState.currentRound === 'PARES' && !gameState.paresDeclarations[playerIndex]) {
+        // Declare pares based on actual cards
+        const cards = getPlayerCards(playerIndex);
+        const paresResult = calculatePares(cards);
+        handleParesDeclaration(playerIndex, paresResult !== null);
+      } else if (gameState.currentRound === 'JUEGO' && !gameState.juegoDeclarations[playerIndex]) {
+        // Declare juego based on actual cards
+        const cards = getPlayerCards(playerIndex);
+        const juegoResult = calculateJuego(cards);
+        handleJuegoDeclaration(playerIndex, juegoResult.hasJuego);
+      } else {
+        // In betting rounds (GRANDE, CHICA, PARES, JUEGO)
+        console.log(`AI Player ${playerIndex + 1} making betting decision in ${gameState.currentRound}`);
+        const playerTeam = getPlayerTeam(playerIndex);
+        const hasActiveBet = gameState.currentBet.bettingTeam && 
+                            gameState.currentBet.bettingTeam !== playerTeam;
+        
+        console.log(`Active bet from team: ${gameState.currentBet.bettingTeam}, AI is in team: ${playerTeam}`);
+        console.log(`Has active bet to respond to: ${hasActiveBet}`);
+        
+        if (hasActiveBet) {
+          // There's a bet from opponent team - AI must respond
+          console.log(`AI responding to bet of ${gameState.currentBet.amount}`);
+          const rand = Math.random();
+          if (rand < 0.4) {
+            // 40% chance to pass (reject bet)
+            console.log('AI decides to PASS (reject)');
+            handleBettingRound(playerIndex, 'paso');
+          } else if (rand < 0.9) {
+            // 50% chance to accept
+            console.log('AI decides to ACCEPT');
+            handleBettingRound(playerIndex, 'accept');
+          } else {
+            // 10% chance to raise
+            const betAmount = (gameState.currentBet.amount || 2) + 2;
+            console.log(`AI decides to RAISE to ${betAmount}`);
+            handleBettingRound(playerIndex, 'envido', betAmount);
+          }
+        } else {
+          // No active bet - AI can start betting or pass
+          console.log('No active bet - AI can bet or pass');
+          const rand = Math.random();
+          if (rand < 0.3) {
+            // 30% chance to make a bet
+            const betAmount = 2 + Math.floor(Math.random() * 3) * 2; // 2, 4, or 6
+            console.log(`AI decides to BET ${betAmount}`);
+            handleBettingRound(playerIndex, 'envido', betAmount);
+          } else {
+            // 70% chance to pass (no bet)
+            console.log('AI decides to PASS (no bet)');
+            handleBettingRound(playerIndex, 'paso');
+          }
+        }
+      }
+    }, 2000 + Math.random() * 2000); // AI takes 2-4 seconds to decide
+  }
+  
+  // Handle timeout when all players' timers expire
+  function handleAllPlayersTimeout() {
+    // Auto discard for any player who hasn't discarded yet
+    for (let i = 0; i < 4; i++) {
+      if (!gameState.cardsDiscarded[i]) {
+        handleDiscard(i, [0, 1, 2, 3]);
+      }
+    }
+  }
+  
+  // Show discard UI for all players
+  function showDiscardUI() {
+    // For all players, allow card selection for discard
+    for (let i = 0; i < 4; i++) {
+      const playerId = `player${i + 1}`;
+      const cards = document.querySelectorAll(`#${playerId}-zone .quantum-card`);
+      
+      cards.forEach((card, cardIndex) => {
+        card.classList.add('selectable');
+        card.dataset.selected = 'false';
+        
+        card.onclick = () => {
+          if (i === 0) { // Only allow local player to select
+            toggleCardSelection(card);
+          }
+        };
+      });
+    }
+    
+    // Show discard button for local player
+    showDiscardButton();
+  }
+  
+  // Toggle card selection for discard
+  function toggleCardSelection(card) {
+    const isSelected = card.dataset.selected === 'true';
+    card.dataset.selected = isSelected ? 'false' : 'true';
+    
+    if (isSelected) {
+      card.style.transform = 'translateY(0)';
+      card.style.border = '';
+    } else {
+      card.style.transform = 'translateY(-20px)';
+      card.style.border = '3px solid #2ec4b6';
+    }
+  }
+  
+  // Show discard button
+  function showDiscardButton() {
+    // Hide the quantum gate buttons
+    const controls = document.querySelector('.scoreboard-controls');
+    if (controls) {
+      controls.style.display = 'none';
+    }
+    
+    // Create discard button
+    const discardBtn = document.createElement('button');
+    discardBtn.id = 'discard-button';
+    discardBtn.className = 'quantum-gate';
+    discardBtn.innerHTML = `
+      <div style="font-size: 1.5rem;">🗑️</div>
+      <div class="gate-label">DESCARTAR</div>
+    `;
+    discardBtn.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 100;
+      padding: 20px 40px;
+      font-size: 1.2rem;
+    `;
+    
+    discardBtn.onclick = () => {
+      // Get selected cards
+      const selectedCards = [];
+      const cards = document.querySelectorAll('#player1-zone .quantum-card');
+      cards.forEach((card, index) => {
+        if (card.dataset.selected === 'true') {
+          selectedCards.push(index);
+        }
+      });
+      
+      // Discard selected cards
+      handleDiscard(0, selectedCards);
+      
+      // Remove discard button
+      discardBtn.remove();
+      
+      // Show controls again
+      if (controls) {
+        controls.style.display = '';
+      }
+    };
+    
+    document.body.appendChild(discardBtn);
+  }
+  
+  // Deal new cards after discard
+  function dealNewCards() {
+    // For each player, replace discarded cards
+    for (let i = 0; i < 4; i++) {
+      const playerId = `player${i + 1}`;
+      const cardsToDiscard = gameState.cardsDiscarded[i] || [];
+      const cardElements = document.querySelectorAll(`#${playerId}-zone .quantum-card`);
+      
+      cardsToDiscard.forEach(cardIndex => {
+        if (cardElements[cardIndex]) {
+          // Remove old card
+          cardElements[cardIndex].remove();
+        }
+      });
+      
+      // Add new cards (would need to generate new cards here)
+      // For now, just remove the selected class
+      const remainingCards = document.querySelectorAll(`#${playerId}-zone .quantum-card`);
+      remainingCards.forEach(card => {
+        card.classList.remove('selectable');
+        card.dataset.selected = 'false';
+        card.style.transform = '';
+        card.style.border = '';
+        card.onclick = null;
+      });
+    }
+  }
+  
+  // Show round result modal
+  function showRoundResult(winningTeam, points) {
+    const teamName = gameState.teams[winningTeam].name;
+    const color = winningTeam === 'team1' ? '#2ec4b6' : '#ff9e6d';
+    
+    const modal = createModal(color);
+    modal.innerHTML = `
+      <div class="modal-content" style="
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98));
+        border: 3px solid ${color}; border-radius: 25px; padding: 45px; text-align: center;
+        box-shadow: 0 15px 50px rgba(0, 0, 0, 0.5), 0 0 30px ${color}40;
+        max-width: 550px; transform: scale(0.8); transition: transform 0.3s;
+      ">
+        <h2 style="color: ${color}; font-size: 2.2rem; margin-bottom: 20px; font-weight: 300; letter-spacing: 4px;">
+          ${teamName.toUpperCase()} GANA
+        </h2>
+        <p style="color: var(--circuit-blueprint); font-size: 1.5rem; margin-bottom: 30px; line-height: 1.8;">
+          +${points} ${points === 1 ? 'punto' : 'puntos'}
+        </p>
+        <p style="color: var(--circuit-blueprint); font-size: 1rem;">
+          Ronda: ${gameState.currentRound}
+        </p>
+      </div>
+    `;
+    
+    document.body.appendChild(modal);
+    animateModal(modal);
+    
+    // Auto close after 2.5 seconds
+    setTimeout(() => {
+      closeModal(modal);
+    }, 2500);
+  }
+
+  function matchEntangledCards() {
+    // Get entangled and superposed cards from player1 (my hand)
+    const player1Cards = document.querySelectorAll('#player1-zone .quantum-card');
+    const player1Entangled = new Set();
+    const player1Superposed = new Set();
+    
+    player1Cards.forEach(card => {
+      if (card.dataset.entangled === 'true') {
+        player1Entangled.add(card.dataset.partner);
+      }
+      if (card.dataset.superposed === 'true') {
+        player1Superposed.add(card.dataset.value2);
+      }
+    });
+    
+    if (player1Entangled.size === 0 && player1Superposed.size === 0) return;
+    
+    // Teammate is at player3 (index 2, top position)
+    const teammateCards = document.querySelectorAll('#player3-zone .quantum-card');
+    
+    teammateCards.forEach(card => {
+      const mainValue = card.dataset.mainValue;
+      
+      // Solo iluminar borde cuando está entrelazada con una mía (no superpuesta)
+      if (card.classList.contains('entangled-candidate')) {
+        if (mainValue && player1Entangled.has(mainValue)) {
+          card.classList.remove('entangled-candidate');
+          card.classList.add('entangled-card');
+          card.style.setProperty('--entangle-color', card.dataset.suitColor);
+        } else {
+          card.classList.remove('entangled-candidate');
+        }
+      }
+      
+      if (card.classList.contains('superposed-candidate')) {
+        card.classList.remove('superposed-candidate');
+      }
+    });
+  }
+
+  function getCharacterColor(characterKey) {
+    const characterColors = {
+      'preskill': 'teal',
+      'cirac': 'coral',
+      'zoller': 'lavender',
+      'deutsch': 'gold'
+    };
+    return characterColors[characterKey] || 'teal';
+  }
+
+  function getCharacterColorValue(characterKey) {
+    const characterColorValues = {
+      'preskill': '#2ec4b6',  // teal
+      'cirac': '#ff9e6d',     // coral
+      'zoller': '#a78bfa',    // lavender
+      'deutsch': '#f5c518'    // gold
+    };
+    return characterColorValues[characterKey] || '#2ec4b6';
+  }
+
+  function getPlayerColor(index) {
+    const colors = ['teal', 'coral', 'lavender', 'gold'];
+    return colors[index];
+  }
+
+  function getPlayerColorValue(index) {
+    const colorValues = {
+      0: '#2ec4b6',  // teal
+      1: '#ff9e6d',  // coral
+      2: '#a78bfa',  // lavender
+      3: '#f5c518'   // gold
+    };
+    return colorValues[index] || '#2ec4b6';
+  }
+
+  function createCard(value, suit, suitSymbol, index, isCurrentPlayer, isTeammate, suitColor, playerIndex, gameMode = '4') {
+    const card = document.createElement('div');
+    const isLateralPlayer = playerIndex === 1 || playerIndex === 3;
+    card.className = `quantum-card card-${suit} card-dealing${isLateralPlayer ? ' card-lateral' : ''}${playerIndex === 3 ? ' card-left' : ''}`;
+    card.dataset.dealOrder = String(playerIndex * 4 + index);
+    
+    const rotation = (Math.random() - 0.5) * 6;
+    // Rotar cartas de jugadores laterales (2 y 4 = índices 1 y 3)
+    let cardRotation = rotation;
+    if (isLateralPlayer) {
+      cardRotation = rotation + 90; // Rotar 90 grados para jugadores de los lados
+      if (playerIndex === 3) {
+        cardRotation = rotation + 270; // Rotar 270 grados (90 + 180) para jugador izquierdo
+      }
+    }
+    card.style.setProperty('--rotation', `${cardRotation}deg`);
+
+    // Determine if card is entangled or superposed
+    let isEntangled = false;
+    let isSuperposed = false;
+    
+    // A and K of the same suit are ALWAYS entangled with each other
+    // In 8 reyes mode: 2 and 3 are also entangled with each other
+    const is8Reyes = gameMode === '8';
+    if (value === 'A' || value === 'K') {
+      isEntangled = true;
+    } else if (is8Reyes && (value === '2' || value === '3')) {
+      isEntangled = true;
+    } else {
+      // For other cards (4-7, J, Q in 4 reyes; 4-7, J, Q in 8 reyes): superposition or regular
+      if (Math.random() > 0.5) {
+        isSuperposed = true;
+      }
+    }
+    
+    const cardValues = ['A', '2', '3', '4', '5', '6', '7', 'J', 'Q', 'K'];
+    let entangledPartner = '';
+    let superposedValue = '';
+    let coefficientA = 0;
+    let coefficientB = 0;
+    
+    if (isEntangled) {
+      if (value === 'A') {
+        entangledPartner = 'K';
+      } else if (value === 'K') {
+        entangledPartner = 'A';
+      } else if (value === '2') {
+        entangledPartner = '3';
+      } else if (value === '3') {
+        entangledPartner = '2';
+      }
+      
+      // Entangled cards are always 50-50
+      coefficientA = 0.7071; // sqrt(2)/2 ≈ 0.707
+      coefficientB = 0.7071; // sqrt(2)/2 ≈ 0.707
+      
+      // Solo agregar glow entrelazado si:
+      // 1. Es el jugador actual (player1), O
+      // 2. Es el compañero (player3, top) Y será verificado después
+      if (isCurrentPlayer) {
+        card.classList.add('entangled-card');
+        card.style.setProperty('--entangle-color', suitColor);
+      } else if (isTeammate) {
+        card.classList.add('entangled-candidate');
+      }
+      card.dataset.entangled = 'true';
+      card.dataset.mainValue = value;
+      card.dataset.partner = entangledPartner;
+      card.dataset.playerIndex = playerIndex;
+      card.dataset.suitColor = suitColor;
+    } else if (isSuperposed) {
+      // Superposition: only for cards that are NOT A or K
+      // Superpose with the next card value
+      if (value !== 'A' && value !== 'K') {
+        const allValues = ['A', '2', '3', '4', '5', '6', '7', 'J', 'Q', 'K'];
+        const currentIndex = allValues.indexOf(value);
+        superposedValue = allValues[(currentIndex + 1) % allValues.length];
+      } else {
+        // If A or K, make it regular instead
+        isSuperposed = false;
+      }
+      
+      if (isSuperposed) {
+        // Generate random coefficients normalized: a² + b² = 1
+        const angle = Math.random() * Math.PI / 2;
+        coefficientA = Math.cos(angle);
+        coefficientB = Math.sin(angle);
+        
+        // Add glow for superposed cards (like entangled)
+        if (isCurrentPlayer) {
+          card.classList.add('superposed-card');
+          card.style.setProperty('--superpose-color', suitColor);
+        } else if (isTeammate) {
+          card.classList.add('superposed-candidate');
+        }
+        
+        card.dataset.superposed = 'true';
+        card.dataset.value1 = value;
+        card.dataset.value2 = superposedValue;
+        card.dataset.coeffA = coefficientA.toFixed(2);
+        card.dataset.coeffB = coefficientB.toFixed(2);
+        card.dataset.mainValue = value;
+        card.dataset.playerIndex = playerIndex;
+        card.dataset.suitColor = suitColor;
+      }
+    }
+
+    // Solo el jugador actual ve el contenido de sus cartas; compañero y oponentes ven ψ
+    const showCardContent = isCurrentPlayer;
+    
+    if (!showCardContent) {
+      // Compañero y oponentes: boca abajo (ψ). El compañero tendrá glow en el borde si está entrelazada (en matchEntangledCards).
+      const hiddenLabel = document.createElement('div');
+      let hiddenClass = 'hidden-card-symbol';
+      if (playerIndex === 1) hiddenClass += ' hidden-symbol-right';
+      if (playerIndex === 3) hiddenClass += ' hidden-symbol-left';
+      hiddenLabel.className = hiddenClass;
+      hiddenLabel.innerHTML = 'ψ';
+      hiddenLabel.style.fontSize = '3rem';
+      hiddenLabel.style.opacity = '0.9';
+      card.appendChild(hiddenLabel);
+    } else {
+      // Cartas visibles del jugador actual - todas con dos números en esquinas
+      
+      // Top right label
+      const topLabel = document.createElement('div');
+      topLabel.className = `dirac-label card-top${(playerIndex === 1 || playerIndex === 3) ? ' label-flipped' : ''}`;
+      topLabel.style.color = suitColor;
+      
+      if (isSuperposed) {
+        topLabel.innerHTML = `|${value}⟩`;
+      } else if (isEntangled) {
+        topLabel.innerHTML = `|${value}⟩`;
+      } else {
+        topLabel.innerHTML = `|${value}⟩`;
+      }
+      card.appendChild(topLabel);
+
+      // Bottom left label - siempre mostrar otro número (boca arriba)
+      const bottomLabel = document.createElement('div');
+      bottomLabel.className = `dirac-label card-bottom${(playerIndex === 1 || playerIndex === 3) ? ' label-flipped' : ''}`;
+      bottomLabel.style.color = suitColor;
+      
+      if (isSuperposed && superposedValue) {
+        // Para superpuestas: mostrar el otro valor sin '+'
+        bottomLabel.innerHTML = `|${superposedValue}⟩`;
+      } else if (isEntangled && entangledPartner) {
+        // Para entrelazadas: mostrar el partner
+        bottomLabel.innerHTML = `|${entangledPartner}⟩`;
+      } else {
+        // Para normales: mostrar el mismo valor
+        bottomLabel.innerHTML = `|${value}⟩`;
+      }
+      card.appendChild(bottomLabel);
+
+      // Suit symbol
+      const suitIcon = document.createElement('div');
+      let suitClass = `suit-icon suit-${suit}`;
+      if (playerIndex === 1) suitClass += ' suit-icon-right';
+      if (playerIndex === 3) suitClass += ' suit-icon-left';
+      suitIcon.className = suitClass;
+      suitIcon.innerHTML = suitSymbol;
+      suitIcon.style.color = suitColor;
+      card.appendChild(suitIcon);
+
+      // Bloch sphere
+      const bloch = document.createElement('div');
+      bloch.className = 'bloch-sphere';
+      let state = 'superposition';
+      let blochParams = [];
+      
+      if (isEntangled) {
+        state = 'entangled';
+        bloch.innerHTML = CardGenerator.generateBlochSphere(state, true, value, entangledPartner, 0, 0, suitColor);
+      } else if (isSuperposed) {
+        // Superposed state with coefficients
+        state = 'superposed';
+        bloch.innerHTML = CardGenerator.generateBlochSphere(state, false, value, superposedValue, coefficientA, coefficientB, suitColor);
+      } else {
+        // Non-entangled: random up or down
+        state = Math.random() > 0.5 ? 'up' : 'down';
+        bloch.innerHTML = CardGenerator.generateBlochSphere(state, false, '0', '1', 0, 0, suitColor);
+      }
+      card.appendChild(bloch);
+
+      // Quantum decoration
+      const decoration = document.createElement('div');
+      decoration.className = 'quantum-decoration';
+      decoration.textContent = value;
+      card.appendChild(decoration);
+
+      // Coefficients display for superposed cards
+      if (isSuperposed && superposedValue) {
+        // Top left coefficient
+        const coeffA = document.createElement('div');
+        coeffA.className = 'superposition-coefficient coeff-top';
+        coeffA.style.color = suitColor;
+        coeffA.innerHTML = `<small>${coefficientA.toFixed(2)}</small>`;
+        card.appendChild(coeffA);
+        
+        // Bottom right coefficient
+        const coeffB = document.createElement('div');
+        coeffB.className = 'superposition-coefficient coeff-bottom';
+        coeffB.style.color = suitColor;
+        coeffB.innerHTML = `<small>${coefficientB.toFixed(2)}</small>`;
+        card.appendChild(coeffB);
+      }
+
+      // Particle effect for entangled cards
+      if (isEntangled) {
+        for (let i = 0; i < 6; i++) {
+          const particle = document.createElement('div');
+          particle.className = 'entangle-particle';
+          particle.style.setProperty('--particle-delay', `${i * 0.15}s`);
+          particle.style.setProperty('--particle-color', suitColor);
+          card.appendChild(particle);
+        }
+      }
+    }
+
+    // Card click interaction
+    card.addEventListener('click', () => {
+      showCardDetails(value, suit, suitSymbol, isCurrentPlayer, suitColor, isEntangled, entangledPartner, isSuperposed, superposedValue, coefficientA, coefficientB);
+    });
+
+    return card;
+  }
+
+  function createScoreboard() {
+    const scoreboard = document.createElement('div');
+    scoreboard.className = 'scoreboard';
+    
+    // Get individual player scores (from data-score or parse text like "(0)")
+    const getScore = (sel) => {
+      const el = document.querySelector(sel + ' .character-score');
+      if (!el) return 0;
+      const ds = el.dataset?.score;
+      if (ds !== undefined) return parseInt(ds, 10) || 0;
+      return parseInt((el.textContent || '').replace(/[^0-9-]/g, ''), 10) || 0;
+    };
+    const player1Score = getScore('#player1-zone');
+    const player2Score = getScore('#player2-zone');
+    const player3Score = getScore('#player3-zone');
+    const player4Score = getScore('#player4-zone');
+    
+    // Calculate team scores from gameState
+    const team1Score = gameState.teams.team1.score;
+    const team2Score = gameState.teams.team2.score;
+    
+    // Calculate probabilities for player 1
+    const player1Cards = document.querySelectorAll('#player1-zone .quantum-card');
+    const cardValues = [];
+    const entangledInfo = []; // Track entangled cards
+    const superposedInfo = []; // Track superposed cards
+    
+    player1Cards.forEach((card, idx) => {
+      // Extract the main card value from quantum-decoration element
+      const decoration = card.querySelector('.quantum-decoration');
+      if (decoration) {
+        const value = decoration.textContent.trim();
+        cardValues.push(value);
+        
+        // Check if card is entangled
+        if (card.dataset.entangled === 'true') {
+          entangledInfo.push({
+            index: idx,
+            value1: value,
+            value2: card.dataset.partner
+          });
+        }
+        
+        // Check if card is superposed
+        if (card.dataset.superposed === 'true') {
+          superposedInfo.push({
+            index: idx,
+            value1: value,
+            value2: card.dataset.superposedValue
+          });
+        }
+      }
+    });
+    
+    const paresProb = calculateParesProbability(cardValues, entangledInfo, superposedInfo);
+    const juegoProb = calculateJuegoProbability(cardValues, entangledInfo, gameMode);
+    
+    scoreboard.innerHTML = `
+      <div class="scoreboard-title">Marcador Cuántico</div>
+      <div class="scoreboard-teams">
+        <div class="team-score">
+          <div class="team-label">Copenhague<br><small>(Preskill + Zoller)</small></div>
+          <div class="team-points">${team1Score}</div>
+        </div>
+        <div class="team-vs">VS</div>
+        <div class="team-score">
+          <div class="team-label">Bohmian<br><small>(Cirac + Deutsch)</small></div>
+          <div class="team-points">${team2Score}</div>
+        </div>
+      </div>
+      <div class="scoreboard-stats">
+        <div class="stat-item">
+          <div class="stat-label">Ronda</div>
+          <div class="stat-value">${gameState.currentRound}</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Manos</div>
+          <div class="stat-value">12</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Pares %</div>
+          <div class="stat-value">${paresProb}%</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Juego %</div>
+          <div class="stat-value">${juegoProb}%</div>
+        </div>
+      </div>
+      <div class="scoreboard-controls">
+        <button class="quantum-gate" title="Mus: Aplicar Puerta Hadamard">
+          H
+          <div class="gate-label">MUS</div>
+        </button>
+        <button class="quantum-gate m-gate" title="Envido: Medir Qubits">
+          M
+          <div class="gate-label">ENVIDO</div>
+        </button>
+        <button class="quantum-gate i-gate" title="Paso: Identity Gate">
+          I
+          <div class="gate-label">PASO</div>
+        </button>
+        <button class="quantum-gate accept-gate" title="Aceptar: Acepta la apuesta">
+          ✓
+          <div class="gate-label">ACEPTA</div>
+        </button>
+        <button class="quantum-gate ordago-gate" title="Órdago: Apuesta Máxima">
+          O
+          <div class="gate-label">ÓRDAGO</div>
+        </button>
+      </div>
+    `;
+    gameContainer.appendChild(scoreboard);
+
+    // Add button interactions - now integrated with round system
+    const buttons = scoreboard.querySelectorAll('.quantum-gate');
+    
+    // Button 1 - MUS/PARES/JUEGO button
+    buttons[0].onclick = () => {
+      if (gameState.activePlayerIndex === 0) {
+        if (gameState.currentRound === 'MUS') {
+          handleMusRound(0, 'mus');
+        } else if (gameState.currentRound === 'PARES' && !gameState.paresDeclarations[0]) {
+          handleParesDeclaration(0, true);
+        } else if (gameState.currentRound === 'JUEGO' && !gameState.juegoDeclarations[0]) {
+          const cards = getPlayerCards(0);
+          const juegoResult = calculateJuego(cards);
+          handleJuegoDeclaration(0, true);
+        }
+      }
+    };
+    
+    // Button 2 - ENVIDO/NO/NO QUIERO button
+    buttons[1].onclick = () => {
+      if (gameState.activePlayerIndex === 0) {
+        if (gameState.currentRound === 'PARES' && !gameState.paresDeclarations[0]) {
+          handleParesDeclaration(0, false);
+        } else if (gameState.currentRound === 'JUEGO' && !gameState.juegoDeclarations[0]) {
+          handleJuegoDeclaration(0, false);
+        } else if (gameState.currentRound === 'MUS') {
+          // End mus and start envido bet
+          showEnvidoModal((amount) => {
+            gameState.currentBet.amount = amount;
+            handleMusRound(0, 'envido', { amount: amount });
+          });
+        } else if (gameState.currentRound === 'GRANDE' || gameState.currentRound === 'CHICA' ||
+                   gameState.currentRound === 'PARES' || gameState.currentRound === 'JUEGO') {
+          // Make or raise bet in current round
+          showEnvidoModal((amount) => {
+            handleBettingRound(0, 'raise', amount);
+          });
+        }
+      }
+    };
+    
+    // Button 3 - PASO/NO QUIERO button - pass in any round
+    buttons[2].onclick = () => {
+      if (gameState.activePlayerIndex === 0) {
+        if (gameState.currentRound === 'MUS') {
+          handleMusRound(0, 'paso');
+        } else {
+          handleBettingRound(0, 'paso');
+        }
+      }
+    };
+    
+    // Button 4 - ACCEPT/QUIERO button - accept the bet
+    buttons[3].onclick = () => {
+      if (gameState.activePlayerIndex === 0) {
+        if (gameState.currentRound === 'GRANDE' || gameState.currentRound === 'CHICA' || 
+            gameState.currentRound === 'PARES' || gameState.currentRound === 'JUEGO') {
+          handleBettingRound(0, 'accept');
+        }
+      }
+    };
+    
+    // ORDAGO button - all-in bet
+    buttons[4].onclick = () => {
+      if (gameState.activePlayerIndex === 0) {
+        if (gameState.currentRound === 'MUS') {
+          handleMusRound(0, 'ordago');
+        } else {
+          handleBettingRound(0, 'ordago');
+        }
+      }
+    };
+    
+    // Initialize button visibility - hide ACCEPT button initially (MUS round)
+    buttons[3].style.display = 'none';
+  }
+
+  // Update scoreboard with current game state
+  function updateScoreboard() {
+    const team1ScoreEl = document.querySelector('.team-score:first-child .team-points');
+    const team2ScoreEl = document.querySelector('.team-score:last-child .team-points');
+    const roundEl = document.querySelector('.stat-item:first-child .stat-value');
+    
+    if (team1ScoreEl) team1ScoreEl.textContent = gameState.teams.team1.score;
+    if (team2ScoreEl) team2ScoreEl.textContent = gameState.teams.team2.score;
+    if (roundEl) roundEl.textContent = gameState.currentRound;
+    
+    // Update button labels and visibility based on current round
+    const buttons = document.querySelectorAll('.scoreboard-controls .quantum-gate');
+    if (buttons.length >= 5) {
+      const button1Label = buttons[0].querySelector('.gate-label');
+      const button2Label = buttons[1].querySelector('.gate-label');
+      const button3Label = buttons[2].querySelector('.gate-label'); // PASO/NO QUIERO button
+      const button4Label = buttons[3].querySelector('.gate-label'); // ACCEPT/QUIERO button
+      const acceptButton = buttons[3]; // ACCEPT button
+      
+      // Check if we're in a declaration phase
+      const inParesDeclaration = gameState.currentRound === 'PARES' && 
+        (!gameState.paresDeclarations || !gameState.paresDeclarations[0]);
+      const inJuegoDeclaration = gameState.currentRound === 'JUEGO' && 
+        (!gameState.juegoDeclarations || !gameState.juegoDeclarations[0]);
+      
+      // Check if there's an active bet
+      const hasActiveBet = gameState.currentBet && gameState.currentBet.bettingTeam;
+      const localPlayerTeam = getPlayerTeam(0);
+      const isOpponentsBet = hasActiveBet && gameState.currentBet.bettingTeam !== localPlayerTeam;
+      
+      if (inParesDeclaration) {
+        // In PARES declaration phase
+        if (button1Label) button1Label.textContent = 'PARES';
+        if (button2Label) button2Label.textContent = 'NO PARES';
+        acceptButton.style.display = 'none'; // Hide ACCEPT during declaration
+        buttons[1].style.display = 'inline-flex'; // Show NO button
+        buttons[2].style.display = 'inline-flex'; // Show PASO
+        buttons[4].style.display = 'inline-flex'; // Show ÓRDAGO
+      } else if (inJuegoDeclaration) {
+        // In JUEGO declaration phase
+        if (button1Label) button1Label.textContent = 'JUEGO';
+        if (button2Label) button2Label.textContent = 'NO JUEGO';
+        acceptButton.style.display = 'none'; // Hide ACCEPT during declaration
+        buttons[1].style.display = 'inline-flex'; // Show NO button
+        buttons[2].style.display = 'inline-flex'; // Show PASO
+        buttons[4].style.display = 'inline-flex'; // Show ÓRDAGO
+      } else if (hasActiveBet && isOpponentsBet) {
+        // There's an active bet from the opponent team - show ENVIDO, NO QUIERO, QUIERO, and ÓRDAGO
+        if (button1Label) button1Label.textContent = 'MUS';
+        if (button2Label) button2Label.textContent = 'ENVIDO';
+        if (button3Label) button3Label.textContent = 'NO QUIERO';
+        if (button4Label) button4Label.textContent = 'QUIERO';
+        buttons[0].style.display = 'none'; // Hide MUS when responding to bet
+        buttons[1].style.display = 'inline-flex'; // Show ENVIDO (counter-raise)
+        buttons[2].style.display = 'inline-flex'; // Show NO QUIERO (PASO)
+        buttons[3].style.display = 'inline-flex'; // Show QUIERO (accept)
+        buttons[4].style.display = 'inline-flex'; // Show ÓRDAGO
+      } else {
+        // Default labels (no active bet or it's our team's bet)
+        if (button1Label) button1Label.textContent = 'MUS';
+        if (button2Label) button2Label.textContent = 'ENVIDO';
+        if (button3Label) button3Label.textContent = 'PASO';
+        if (button4Label) button4Label.textContent = 'ACEPTA';
+        buttons[0].style.display = 'inline-flex';
+        buttons[1].style.display = 'inline-flex';
+        buttons[2].style.display = 'inline-flex';
+        buttons[4].style.display = 'inline-flex';
+        
+        // Show ACCEPT button only in betting rounds (GRANDE, CHICA, PARES betting, JUEGO betting)
+        const isBettingRound = gameState.currentRound === 'GRANDE' || 
+                               gameState.currentRound === 'CHICA' ||
+                               (gameState.currentRound === 'PARES' && !inParesDeclaration) ||
+                               (gameState.currentRound === 'JUEGO' && !inJuegoDeclaration);
+        acceptButton.style.display = isBettingRound ? 'inline-flex' : 'none';
+      }
+    }
+  }
+  
+  // Show action notification
+  function showActionNotification(playerIndex, action, extraData = {}) {
+    const playerNames = ['Preskill', 'Cirac', 'Zoller', 'Deutsch'];
+    const amount = extraData.amount || gameState.currentBet.amount || '';
+    const actionTexts = {
+      'mus': 'MUS',
+      'paso': 'PASO',
+      'envido': `ENVIDO ${amount}`,
+      'ordago': 'ÓRDAGO',
+      'accept': 'QUIERO',
+      'raise': `SUBE A ${amount}`,
+      'pares': 'PARES',
+      'no_pares': 'NO PARES',
+      'juego': 'JUEGO',
+      'no_juego': 'NO JUEGO'
+    };
+    
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+      border: 2px solid #2ec4b6;
+      border-radius: 15px;
+      padding: 15px 30px;
+      color: #2ec4b6;
+      font-size: 1.2rem;
+      font-weight: bold;
+      z-index: 2000;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      opacity: 0;
+      transition: opacity 0.3s;
+    `;
+    
+    notification.textContent = `${playerNames[playerIndex]}: ${actionTexts[action] || action.toUpperCase()}`;
+    document.body.appendChild(notification);
+    
+    // Fade in
+    setTimeout(() => {
+      notification.style.opacity = '1';
+    }, 10);
+    
+    // Fade out and remove
+    setTimeout(() => {
+      notification.style.opacity = '0';
+      setTimeout(() => {
+        notification.remove();
+      }, 300);
+    }, 2000);
+  }
+
+  function playDealAnimation() {
+    const cards = document.querySelectorAll('#game-container .quantum-card.card-dealing');
+    const DEAL_DELAY_MS = 55;
+    cards.forEach((card, i) => {
+      const order = parseInt(card.dataset.dealOrder, 10) || i;
+      setTimeout(() => {
+        card.classList.remove('card-dealing');
+        card.classList.add('card-dealt');
+        card.classList.add('float-animation');
+        card.style.animationDelay = `${order * 0.15}s`;
+      }, order * DEAL_DELAY_MS);
+    });
+  }
+
+  function calculateParesProbability(cardValues, entangledInfo = []) {
+    // En el juego Mus español:
+    // A = 2 (equivalencia)
+    // 3 = K (equivalencia)
+    
+    const normalizeValue = (val) => {
+      if (val === 'A') return '2';  // A equivale a 2
+      if (val === '3') return 'K';  // 3 equivale a K
+      return val;
+    };
+    
+    // Si no hay cartas entrelazadas, es simple
+    if (entangledInfo.length === 0) {
+      const valueCounts = {};
+      cardValues.forEach(val => {
+        const normalized = normalizeValue(val);
+        valueCounts[normalized] = (valueCounts[normalized] || 0) + 1;
+      });
+      
+      for (let val in valueCounts) {
+        if (valueCounts[val] >= 2) {
+          return '100'; // Tiene pares
+        }
+      }
+      return '0'; // No tiene pares
+    }
+    
+    // Si hay cartas entrelazadas, calcular todas las combinaciones posibles
+    const cardValuesWithoutEntangled = cardValues.filter((_, idx) => {
+      return !entangledInfo.some(e => e.index === idx);
+    });
+    
+    // Obtener índices de cartas entrelazadas
+    const entangledIndices = entangledInfo.map(e => e.index);
+    
+    // Generar todas las combinaciones posibles de colapso de cartas entrelazadas
+    const numEntangled = entangledInfo.length;
+    const totalCombinations = Math.pow(2, numEntangled);
+    let combinationsWithPairs = 0;
+    
+    for (let combination = 0; combination < totalCombinations; combination++) {
+      const testValues = [...cardValuesWithoutEntangled];
+      
+      // Para cada carta entrelazada, agregar su valor según la combinación
+      entangledInfo.forEach((entangled, idx) => {
+        const bit = (combination >> idx) & 1;
+        const value = bit === 0 ? entangled.value1 : entangled.value2;
+        testValues.push(value);
+      });
+      
+      // Contar cartas normalizadas en esta combinación
+      const valueCounts = {};
+      testValues.forEach(val => {
+        const normalized = normalizeValue(val);
+        valueCounts[normalized] = (valueCounts[normalized] || 0) + 1;
+      });
+      
+      // Verificar si esta combinación tiene pares
+      let hasPair = false;
+      for (let val in valueCounts) {
+        if (valueCounts[val] >= 2) {
+          hasPair = true;
+          break;
+        }
+      }
+      
+      if (hasPair) {
+        combinationsWithPairs++;
+      }
+    }
+    
+    // Calcular porcentaje
+    const probability = Math.round((combinationsWithPairs / totalCombinations) * 100);
+    return probability.toString();
+  }
+
+  function calculateJuegoProbability(cardValues, entangledInfo = [], gameMode = '4') {
+    // En modo 4 reyes los treses valen 3 para el punto; en 8 reyes valen 10
+    const getCardPoints = (val) => {
+      if (val === 'A') return 1;
+      if (val === '2') return 1;
+      if (val === '3') return gameMode === '4' ? 3 : 10;
+      if (val === 'J') return 10;
+      if (val === 'Q') return 10;
+      if (val === 'K') return 10;
+      return parseInt(val) || 0;
+    };
+    
+    // If no entangled cards, calculate simple probability
+    if (entangledInfo.length === 0) {
+      const sum = cardValues.reduce((acc, val) => acc + getCardPoints(val), 0);
+      return calculateProbabilityFromSum(sum).toFixed(0);
+    }
+    
+    // For entangled cards: calculate probability that at least one configuration gives Juego
+    // We need to consider all possible combinations
+    let successfulCombinations = 0;
+    let totalCombinations = Math.pow(2, entangledInfo.length);
+    
+    // Generate all possible combinations
+    for (let i = 0; i < totalCombinations; i++) {
+      let sum = 0;
+      
+      // Add points from non-entangled cards
+      for (let j = 0; j < cardValues.length; j++) {
+        const isEntangled = entangledInfo.some(e => e.index === j);
+        if (!isEntangled) {
+          sum += getCardPoints(cardValues[j]);
+        }
+      }
+      
+      // Add points from entangled cards based on this combination
+      entangledInfo.forEach((entangled, bitIndex) => {
+        const bit = (i >> bitIndex) & 1;
+        const value = bit === 0 ? entangled.value1 : entangled.value2;
+        sum += getCardPoints(value);
+      });
+      
+      // Check if this combination results in Juego (sum >= 31)
+      if (sum >= 31) {
+        successfulCombinations++;
+      }
+    }
+    
+    // Calculate probability as percentage of successful combinations
+    const probability = (successfulCombinations / totalCombinations) * 100;
+    return probability.toFixed(0);
+  }
+  
+  function calculateProbabilityFromSum(sum) {
+    // Pure probability calculation based on final sum
+    if (sum >= 31) {
+      const excess = sum - 31;
+      if (excess === 0) return 100;
+      if (excess <= 9) return 95 - (excess * 2);
+      return 50;
+    } else {
+      const deficit = 31 - sum;
+      if (deficit === 0) return 100;
+      if (deficit <= 5) return 90 - (deficit * 5);
+      if (deficit <= 10) return 65 - (deficit * 3);
+      if (deficit <= 15) return 35 - (deficit * 2);
+      return 10;
+    }
+  }
+
+  function showCharacterModal(characterName, description) {
+    // Remove existing modal if any
+    const existingModal = document.querySelector('.character-modal');
+    if (existingModal) existingModal.remove();
+    
+    const modal = document.createElement('div');
+    modal.className = 'character-modal';
+    modal.innerHTML = `
+      <div class="character-modal-content">
+        <div class="character-modal-header">
+          <h2>${characterName}</h2>
+          <button class="character-modal-close">✕</button>
+        </div>
+        <div class="character-modal-body">
+          <p>${description}</p>
+        </div>
+      </div>
+    `;
+    
+    const closeBtn = modal.querySelector('.character-modal-close');
+    closeBtn.addEventListener('click', () => modal.remove());
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.remove();
+    });
+    
+    document.body.appendChild(modal);
+  }
+
+  function showCardDetails(value, suit, symbol, isCurrentPlayer, suitColor, isEntangled, entangledPartner, isSuperposed = false, superposedValue = '', coeffA = 0, coeffB = 0) {
+    if (!isCurrentPlayer) {
+      // Cannot reveal hidden cards
+      return;
+    }
+    
+    const modal = createModal('#2ec4b6');
+    
+    let cardInfo = '';
+    let stateLabel = '';
+    let stateColor = '#2ec4b6';
+    
+    if (isSuperposed) {
+      // Para cartas superpuestas: mostrar probabilidades
+      const prob1 = (coeffA * coeffA * 100).toFixed(1);
+      const prob2 = (coeffB * coeffB * 100).toFixed(1);
+      
+      stateLabel = 'Superposición';
+      stateColor = '#a78bfa';
+      cardInfo = `<div style="color: var(--paper-beige); font-size: 1rem; margin-bottom: 20px;">
+        <strong>Estado Cuántico:</strong><br>
+        ${coeffA.toFixed(2)}|${value}⟩ + ${coeffB.toFixed(2)}|${superposedValue}⟩<br><br>
+        <strong>Probabilidades:</strong><br>
+        |${value}⟩: <strong>${prob1}%</strong><br>
+        |${superposedValue}⟩: <strong>${prob2}%</strong>
+      </div>`;
+    } else if (isEntangled) {
+      stateLabel = 'Entrelazada';
+      stateColor = '#ff9e6d';
+      cardInfo = `<div style="color: var(--paper-beige); font-size: 1rem; margin-bottom: 20px;">
+        <strong>Estado Entrelazado:</strong><br>
+        |${value}⟩/|${entangledPartner}⟩<br>
+        <strong>Estatus:</strong> Entrelazada
+      </div>`;
+    } else {
+      stateLabel = 'Estado Definido';
+      stateColor = '#4338ca';
+      cardInfo = `<div style="color: var(--paper-beige); font-size: 1rem; margin-bottom: 20px;">
+        <strong>Palo:</strong> ${suit.toUpperCase()}
+      </div>`;
+    }
+    
+    modal.innerHTML = `
+      <div class="modal-content" style="
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98));
+        border: 3px solid ${stateColor};
+        border-radius: 25px;
+        padding: 40px;
+        text-align: center;
+        box-shadow: 0 15px 50px rgba(0, 0, 0, 0.5), 0 0 30px ${stateColor}66;
+        max-width: 500px;
+        transform: scale(0.8);
+        transition: transform 0.3s;
+      ">
+        <div style="font-size: 5rem; margin-bottom: 20px; filter: drop-shadow(0 0 10px ${stateColor});">
+          ${symbol}
+        </div>
+        <h2 style="color: ${stateColor}; font-size: 2.5rem; margin-bottom: 15px; font-weight: 300; letter-spacing: 3px;">
+          CARTA: ${value}
+        </h2>
+        <div style="color: ${stateColor}; font-size: 1.1rem; margin-bottom: 20px; font-weight: 600;">
+          ${stateLabel}
+        </div>
+        ${cardInfo}
+        <button id="close-modal" style="
+          background: linear-gradient(135deg, ${stateColor}, ${stateColor}90); color: white; border: none;
+          padding: 14px 35px; border-radius: 25px; font-size: 1rem; cursor: pointer;
+          font-weight: bold; letter-spacing: 2px; box-shadow: 0 5px 20px ${stateColor}99; transition: all 0.3s;
+        ">CERRAR</button>
+      </div>
+    `;
+    
+    document.body.appendChild(modal);
+    animateModal(modal);
+  }
+
+  function showEnvidoModal(callback = null) {
+    const modal = createModal('#a78bfa');
+    modal.innerHTML = `
+      <div class="modal-content" style="
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98));
+        border: 3px solid #a78bfa;
+        border-radius: 25px;
+        padding: 40px;
+        text-align: center;
+        box-shadow: 0 15px 50px rgba(0, 0, 0, 0.5), 0 0 30px rgba(167, 139, 250, 0.4);
+        max-width: 500px;
+        transform: scale(0.8);
+        transition: transform 0.3s;
+      ">
+        <h2 style="color: #a78bfa; font-size: 2.5rem; margin-bottom: 30px; font-weight: 300; letter-spacing: 4px;">
+          ENVIDO
+        </h2>
+        <p style="color: var(--circuit-blueprint); font-size: 1.1rem; margin-bottom: 25px; line-height: 1.6;">
+          Elige tu apuesta:
+        </p>
+        
+        <div style="display: flex; flex-direction: column; gap: 20px; margin-bottom: 30px;">
+          <!-- Opción de Envido 2 -->
+          <button class="envido-option" data-value="2" style="
+            background: linear-gradient(135deg, rgba(167, 139, 250, 0.2), rgba(167, 139, 250, 0.08));
+            border: 2px solid #a78bfa;
+            color: #a78bfa;
+            padding: 12px 20px;
+            border-radius: 12px;
+            font-size: 1rem;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+          ">Envido: 2 puntos</button>
+          
+          <!-- Deslizador de 2 a 30 -->
+          <div class="envido-slider-wrap">
+            <p style="color: var(--circuit-blueprint); font-size: 0.9rem; margin-bottom: 10px;">
+              O desliza para elegir entre 2 y 30:
+            </p>
+            <input type="range" id="envido-slider" class="envido-slider" min="2" max="30" value="15">
+            <p style="color: #a78bfa; font-size: 1.3rem; margin-top: 10px; font-weight: bold;">
+              <span id="slider-value">15</span> puntos
+            </p>
+          </div>
+          
+          <button class="envido-option slider-confirm" data-type="slider" style="
+            background: linear-gradient(135deg, rgba(167, 139, 250, 0.2), rgba(167, 139, 250, 0.08));
+            border: 2px solid #a78bfa;
+            color: #a78bfa;
+            padding: 12px 20px;
+            border-radius: 12px;
+            font-size: 1rem;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+          ">Confirmar Envido</button>
+        </div>
+        
+        <button id="close-modal" style="
+          background: linear-gradient(135deg, #a78bfa, rgba(167, 139, 250, 0.9));
+          color: white;
+          border: none;
+          padding: 12px 30px;
+          border-radius: 12px;
+          font-size: 0.9rem;
+          cursor: pointer;
+          font-weight: bold;
+          letter-spacing: 2px;
+          box-shadow: 0 5px 20px rgba(167, 139, 250, 0.6);
+          transition: all 0.3s;
+        ">CANCELAR</button>
+      </div>
+    `;
+    
+    document.body.appendChild(modal);
+    animateModal(modal);
+    
+    // Slider functionality
+    const slider = modal.querySelector('#envido-slider');
+    const sliderValue = modal.querySelector('#slider-value');
+    slider.addEventListener('input', (e) => {
+      sliderValue.textContent = e.target.value;
+    });
+    
+    // Add click handlers for envido options
+    const envidoButtons = modal.querySelectorAll('.envido-option');
+    envidoButtons.forEach(btn => {
+      btn.addEventListener('mouseenter', () => {
+        btn.style.background = 'linear-gradient(135deg, rgba(167, 139, 250, 0.35), rgba(167, 139, 250, 0.15))';
+        btn.style.transform = 'scale(1.05)';
+      });
+      btn.addEventListener('mouseleave', () => {
+        btn.style.background = 'linear-gradient(135deg, rgba(167, 139, 250, 0.2), rgba(167, 139, 250, 0.08))';
+        btn.style.transform = 'scale(1)';
+      });
+      btn.addEventListener('click', () => {
+        if (btn.dataset.type === 'slider') {
+          const value = parseInt(slider.value);
+          closeModal(modal);
+          if (callback) {
+            callback(value);
+          } else {
+            applyQuantumGate('Envido', `¡Has cantado envido por ${value} puntos!`, '#a78bfa');
+          }
+        } else {
+          const value = parseInt(btn.dataset.value);
+          closeModal(modal);
+          if (callback) {
+            callback(value);
+          } else {
+            applyQuantumGate('Envido', `¡Has cantado envido por ${value} puntos!`, '#a78bfa');
+          }
+        }
+      });
+    });
+  }
+
+  function applyQuantumGate(gateName, message, color) {
+    const modal = createModal(color);
+    modal.innerHTML = `
+      <div class="modal-content" style="
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98));
+        border: 3px solid ${color}; border-radius: 25px; padding: 45px; text-align: center;
+        box-shadow: 0 15px 50px rgba(0, 0, 0, 0.5), 0 0 30px ${color}40;
+        max-width: 550px; transform: scale(0.8); transition: transform 0.3s;
+      ">
+        <div style="
+          width: 80px; height: 80px; margin: 0 auto 25px; border: 4px solid ${color};
+          border-radius: 50%; display: flex; align-items: center; justify-content: center;
+          font-size: 2.5rem; color: ${color}; font-family: 'Courier New', monospace;
+          font-weight: bold; box-shadow: 0 0 20px ${color}60, inset 0 0 20px ${color}20;
+        ">${gateName.charAt(0)}</div>
+        <h2 style="color: ${color}; font-size: 2.2rem; margin-bottom: 20px; font-weight: 300; letter-spacing: 4px;">
+          PUERTA ${gateName.toUpperCase()}
+        </h2>
+        <p style="color: var(--circuit-blueprint); font-size: 1.2rem; margin-bottom: 30px; line-height: 1.8;">
+          ${message}
+        </p>
+        <button id="close-modal" style="
+          background: linear-gradient(135deg, ${color}, ${color}90); color: white; border: none;
+          padding: 14px 40px; border-radius: 25px; font-size: 1rem; cursor: pointer;
+          font-weight: bold; letter-spacing: 2px; box-shadow: 0 5px 20px ${color}60; transition: all 0.3s;
+        ">CONTINUAR</button>
+      </div>
+    `;
+    
+    document.body.appendChild(modal);
+    animateModal(modal);
+  }
+
+  function createModal(color) {
+    const modal = document.createElement('div');
+    modal.style.position = 'fixed';
+    modal.style.top = '0';
+    modal.style.left = '0';
+    modal.style.width = '100%';
+    modal.style.height = '100%';
+    modal.style.background = 'rgba(15, 23, 42, 0.92)';
+    modal.style.backdropFilter = 'blur(8px)';
+    modal.style.display = 'flex';
+    modal.style.justifyContent = 'center';
+    modal.style.alignItems = 'center';
+    modal.style.zIndex = '1000';
+    modal.style.opacity = '0';
+    modal.style.transition = 'opacity 0.3s';
+    return modal;
+  }
+
+  function animateModal(modal) {
+    setTimeout(() => {
+      modal.style.opacity = '1';
+      const content = modal.querySelector('.modal-content');
+      if (content) content.style.transform = 'scale(1)';
+    }, 10);
+    
+    const closeBtn = modal.querySelector('#close-modal');
+    if (closeBtn) {
+      closeBtn.onclick = () => closeModal(modal);
+      closeBtn.onmouseenter = () => {
+        closeBtn.style.transform = 'scale(1.05)';
+      };
+      closeBtn.onmouseleave = () => {
+        closeBtn.style.transform = 'scale(1)';
+      };
+    }
+    
+    modal.onclick = (e) => {
+      if (e.target === modal) closeModal(modal);
+    };
+  }
+
+  function closeModal(modal) {
+    modal.style.opacity = '0';
+    const content = modal.querySelector('.modal-content');
+    if (content) content.style.transform = 'scale(0.8)';
+    setTimeout(() => {
+      if (modal.parentNode) document.body.removeChild(modal);
+    }, 300);
+  }
+}
+
+// Listen for game screen entry (from lobby "Iniciar partida")
+window.addEventListener('enterGameScreen', initGame);
