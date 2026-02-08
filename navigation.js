@@ -794,12 +794,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!gameState.isHost) return;
 
     const allReady = gameState.players.every(p => p.isReady);
-    const enoughPlayers = gameState.players.length === 4;
+    const enoughPlayers = gameState.players.length >= 1;
     
     startButton.disabled = !(allReady && enoughPlayers);
     
     if (!enoughPlayers) {
-      startButton.textContent = `ESPERANDO JUGADORES (${gameState.players.length}/4)`;
+      startButton.textContent = `ESPERANDO JUGADORES (${gameState.players.length}/1)`;
     } else if (!allReady) {
       startButton.textContent = 'ESPERANDO QUE TODOS ESTÉN LISTOS';
     } else {

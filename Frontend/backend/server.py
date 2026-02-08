@@ -172,8 +172,8 @@ def handle_start_game(data):
     room_id = data.get('room_id')
     
     room = room_manager.get_room(room_id)
-    if not room or len(room['players']) < 4:
-        emit('game_error', {'error': 'Need 4 players to start'})
+    if not room or len(room['players']) < 1:
+        emit('game_error', {'error': 'Need at least 1 player to start'})
         return
     
     # Create game instance
