@@ -497,18 +497,19 @@ function initGame() {
     const roomId = window.QuantumMusOnlineRoom;
     socket.emit('get_game_state', { room_id: roomId, player_index: localIdx });
     socket.once('game_state', (data) => {
-      if (data.game_state && data.game_state.my_hand) {
-        const handContainer = document.querySelector('#player1-zone .cards-row');
-        if (handContainer) {
-          handContainer.innerHTML = '';
-          const suitMap = { oros: ['theta', 'θ', '#f5c518'], copas: ['phi', 'φ', '#ff6b6b'], espadas: ['delta', 'δ', '#a78bfa'], bastos: ['psi', 'ψ', '#2ec4b6'] };
-          data.game_state.my_hand.forEach((c, i) => {
-            const s = suitMap[c.suit] || suitMap.oros;
-            const card = createCard(c.value, s[0], s[1], i, true, false, s[2], 0, gameMode);
-            if (card) handContainer.appendChild(card);
-          });
-        }
+      // Fix: Always show hand for local player, even if my_hand is missing
+      const handContainer = document.querySelector('#player1-zone .cards-row');
+      handContainer.innerHTML = '';
+      const suitMap = { oros: ['theta', 'θ', '#f5c518'], copas: ['phi', 'φ', '#ff6b6b'], espadas: ['delta', 'δ', '#a78bfa'], bastos: ['psi', 'ψ', '#2ec4b6'] };
+      let hand = (data.game_state && data.game_state.my_hand) || (data.game_state && data.game_state.hands && data.game_state.hands[localIdx]) || [];
+      if (!hand.length) {
+        console.warn('[ONLINE] No hand found for local player, using fallback empty hand');
       }
+      hand.forEach((c, i) => {
+        const s = suitMap[c.suit] || suitMap.oros;
+        const card = createCard(c.value, s[0], s[1], i, true, false, s[2], 0, gameMode);
+        if (card) handContainer.appendChild(card);
+      });
     });
     socket.on('game_update', (data) => {
       const gs = data.game_state || {};
@@ -818,6 +819,14 @@ function initGame() {
         action: action,
         data: extraData
       });
+      // Fix: For online mode, check if all players have responded and force discard phase if needed
+      setTimeout(() => {
+        const actions = Object.values(gameState.roundActions);
+        if (actions.length === 4 && actions.every(a => a === 'mus')) {
+          console.log('[ONLINE] All players chose MUS - forcing discard phase');
+          startDiscardPhase();
+        }
+      }, 1000);
       return;
     }
     console.log(`Player ${playerIndex + 1} chose: ${action}`);
@@ -1739,7 +1748,10 @@ function initGame() {
   
   function proceedWithParesDeclaration() {
       // Process declarations for all players in order starting from current active player
+      // Prevent repeated declaration after transition
+      if (proceedWithParesDeclaration._locked) return;
       if (Object.keys(gameState.paresDeclarations).length === 4) {
+        proceedWithParesDeclaration._locked = true;
         // All players have declared - proceed to betting or next round
         handleAllParesDeclarationsDone();
         return;
@@ -1981,6 +1993,13 @@ function initGame() {
     } else {
       // In all other cases (nobody has PARES or only one team), proceed to JUEGO declaration
       console.log('Proceeding to JUEGO declaration phase after PARES');
+          // Safety: force transition to JUEGO if betting round stalls
+          setTimeout(() => {
+            if (gameState.currentRound === 'PARES') {
+              console.log('[SAFETY] Forcing transition to JUEGO after PARES betting');
+              moveToNextRound('JUEGO');
+            }
+          }, 15000); // 15 seconds safety timeout
 
       // Ensure juego declarations are reset and preserve any preJuegoDeclarations
       gameState.currentRound = 'JUEGO';
