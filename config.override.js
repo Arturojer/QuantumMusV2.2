@@ -1,1 +1,1 @@
-window.QUANTUM_MUS_SERVER_URL = 'https://quantum-mus-backend.onrender.com';
+window.QUANTUM_MUS_SERVER_URL = 'http://localhost:5000';
