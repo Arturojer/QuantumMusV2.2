@@ -268,6 +268,8 @@ class GrandeBettingHandler:
         A defender accepted the bet.
         Grande phase ends, but hand comparison is DEFERRED until after all 4 phases.
         """
+        from card_deck import get_highest_card
+        
         phase = self.game.state['grandePhase']
         phase['phaseState'] = 'RESOLVED'
         
@@ -281,6 +283,19 @@ class GrandeBettingHandler:
             'resolved': False
         }
         
+        # Get card information for display
+        team1_cards = []
+        team2_cards = []
+        
+        for player_idx, hand in self.game.hands.items():
+            if player_idx in self.game.state['teams']['team1']['players']:
+                team1_cards.extend([card.to_dict() for card in hand])
+            else:
+                team2_cards.extend([card.to_dict() for card in hand])
+        
+        team1_best = get_highest_card(team1_cards, self.game.game_mode)
+        team2_best = get_highest_card(team2_cards, self.game.game_mode)
+        
         logger.info(f"Bet accepted. {phase['currentBetAmount']} points at stake. Comparison deferred.")
         
         return {
@@ -288,6 +303,13 @@ class GrandeBettingHandler:
             'grande_ended': True,
             'bet_accepted': True,
             'bet_amount': phase['currentBetAmount'],
+            'attacking_team': phase['attackingTeam'],
+            'defending_team': phase['defendingTeam'],
+            'reveal_cards': True,
+            'card_info': {
+                'team1_best': team1_best,
+                'team2_best': team2_best
+            },
             'comparison_deferred': True,
             'move_to_next_round': True
         }
@@ -298,6 +320,8 @@ class GrandeBettingHandler:
         Grande is played with no bet (1 point to winner).
         Comparison is deferred.
         """
+        from card_deck import get_highest_card
+        
         phase = self.game.state['grandePhase']
         phase['phaseState'] = 'RESOLVED'
         phase['result'] = {
@@ -307,6 +331,19 @@ class GrandeBettingHandler:
             'resolved': False
         }
         
+        # Get card information for display
+        team1_cards = []
+        team2_cards = []
+        
+        for player_idx, hand in self.game.hands.items():
+            if player_idx in self.game.state['teams']['team1']['players']:
+                team1_cards.extend([card.to_dict() for card in hand])
+            else:
+                team2_cards.extend([card.to_dict() for card in hand])
+        
+        team1_best = get_highest_card(team1_cards, self.game.game_mode)
+        team2_best = get_highest_card(team2_cards, self.game.game_mode)
+        
         logger.info("All players passed. Grande will be compared for 1 point.")
         
         return {
@@ -314,6 +351,11 @@ class GrandeBettingHandler:
             'grande_ended': True,
             'all_passed': True,
             'points_at_stake': 1,
+            'reveal_cards': True,
+            'card_info': {
+                'team1_best': team1_best,
+                'team2_best': team2_best
+            },
             'comparison_deferred': True,
             'move_to_next_round': True
         }

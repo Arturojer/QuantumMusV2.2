@@ -69,7 +69,14 @@ class RoundHandler:
         
         # Use detailed Grande handler for GRANDE phase
         if self.game.state['currentRound'] == 'GRANDE':
-            return self.grande_handler.handle_action(player_index, action, extra_data)
+            result = self.grande_handler.handle_action(player_index, action, extra_data)
+            
+            # If Grande phase ends, transition to next round (CHICA)
+            if result.get('success') and result.get('move_to_next_round'):
+                hand_ended = self.game.move_to_next_round()
+                result['hand_ended'] = hand_ended
+            
+            return result
         
         # Use legacy handler for other rounds (will be updated similarly later)
         player_team = self.game.get_player_team(player_index)
