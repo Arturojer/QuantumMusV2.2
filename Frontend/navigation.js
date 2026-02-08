@@ -641,7 +641,15 @@ document.addEventListener('DOMContentLoaded', () => {
   function startGame() {
     // Reset game initialization flag before starting
     window.gameInitialized = false;
-    
+
+    // Record client timestamp to measure initialization latency
+    try {
+      window._create_start_ts = performance.now();
+      console.log('[client] startGame clicked, timestamp set');
+    } catch (e) {
+      window._create_start_ts = Date.now();
+    }
+
     // Find local player index (from character selection)
     const localIndex = gameState.players.findIndex(p => p.name === gameState.playerName);
     const safeIndex = localIndex >= 0 ? localIndex : 0;

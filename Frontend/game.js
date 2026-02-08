@@ -317,6 +317,20 @@ function resetEntanglementForNewHand() {
 
 function initGame() {
   console.log('initGame called, gameInitialized:', gameInitialized);
+
+  // If the client set a start timestamp, compute and log the client-side init latency
+  try {
+    const now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+    const start = window._create_start_ts;
+    if (start) {
+      const deltaMs = Math.round(now - start);
+      console.log(`[client] initGame started after ${deltaMs}ms from startGame click`);
+      // Expose last measured client init latency
+      window._last_client_init_ms = deltaMs;
+    }
+  } catch (e) {
+    // ignore
+  }
   
   const gameContainer = document.getElementById('game-container');
   if (!gameContainer) {
@@ -338,6 +352,28 @@ function initGame() {
   
   // Clear any previous content
   gameContainer.innerHTML = '';
+
+  // Quick loading overlay to improve perceived responsiveness
+  try {
+    const loadingOverlay = document.createElement('div');
+    loadingOverlay.id = 'game-loading-overlay';
+    loadingOverlay.style.position = 'absolute';
+    loadingOverlay.style.top = '0';
+    loadingOverlay.style.left = '0';
+    loadingOverlay.style.width = '100%';
+    loadingOverlay.style.height = '100%';
+    loadingOverlay.style.display = 'flex';
+    loadingOverlay.style.alignItems = 'center';
+    loadingOverlay.style.justifyContent = 'center';
+    loadingOverlay.style.background = 'rgba(0,0,0,0.35)';
+    loadingOverlay.style.zIndex = '9999';
+    loadingOverlay.innerHTML = '<div style="color:#fff;font-size:18px;padding:12px 18px;border-radius:8px;background:rgba(0,0,0,0.6);">Cargando partida…</div>';
+    gameContainer.appendChild(loadingOverlay);
+    // Remove overlay after expected deal animation completes (~3.5s)
+    setTimeout(() => { try { loadingOverlay.remove(); } catch (e) {} }, 3500);
+  } catch (e) {
+    // ignore failures in diagnostics code
+  }
   
   // Get players and game mode from lobby (set by initializeGame)
   const lobbyPlayers = window.currentPlayers || [];

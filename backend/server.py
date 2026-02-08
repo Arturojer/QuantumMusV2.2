@@ -9,6 +9,14 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 import logging
 import os
 from datetime import datetime
+import time
+
+# Prefer eventlet for better WebSocket support and lower latency under limited CPU
+try:
+    import eventlet
+    eventlet.monkey_patch()
+except Exception:
+    eventlet = None
 
 # Directorio del frontend (padre del backend) para servir archivos estáticos
 FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -41,7 +49,7 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 CORS(app, resources={r"/*": {"origins": CORS_ORIGINS}})
 
 # Initialize Socket.IO (WebSocket) con los mismos orígenes permitidos
-socketio = SocketIO(app, cors_allowed_origins=CORS_ORIGINS, async_mode='threading')
+socketio = SocketIO(app, cors_allowed_origins=CORS_ORIGINS, async_mode='eventlet' if eventlet else 'threading')
 
 # Initialize database
 db.init_app(app)
@@ -81,12 +89,19 @@ def create_room():
     room_name = data.get('name', 'Quantum Room')
     game_mode = data.get('game_mode', '4')
     max_players = 4
-    
+    # Instrumentation: measure server processing time for room creation
+    recv_ts = time.time()
     room = room_manager.create_room(room_name, game_mode, max_players)
-    
+    send_ts = time.time()
+    processing_ms = int((send_ts - recv_ts) * 1000)
+
+    logger.info(f"POST /api/rooms processed in {processing_ms}ms - room {room['id']}")
+
     return jsonify({
         'success': True,
-        'room': room
+        'room': room,
+        'server_ts': datetime.utcnow().isoformat(),
+        'processing_ms': processing_ms
     }), 201
 
 @app.route('/api/stats', methods=['GET'])
@@ -140,14 +155,23 @@ def handle_disconnect():
 @socketio.on('create_room')
 def handle_create_room(data):
     """Create a new game room"""
+    # Instrumentation: measure server-side receive -> response time
+    recv_ts = time.time()
     room_name = data.get('name', 'Quantum Room')
     game_mode = data.get('game_mode', '4')
-    
+
     room = room_manager.create_room(room_name, game_mode, 4)
-    
+
+    send_ts = time.time()
+    processing_ms = int((send_ts - recv_ts) * 1000)
+
+    logger.info(f"Socket create_room processed in {processing_ms}ms - room {room['id']}")
+
     emit('room_created', {
         'success': True,
-        'room': room
+        'room': room,
+        'server_ts': datetime.utcnow().isoformat(),
+        'processing_ms': processing_ms
     })
 
 @socketio.on('join_room')
