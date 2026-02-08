@@ -26,20 +26,28 @@ FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 # En desarrollo, usar * para pruebas locales
 def _get_cors_origins():
     allowed = os.environ.get('ALLOWED_ORIGINS', '').strip()
-    
+    frontend_url = os.environ.get('FRONTEND_URL', '').strip()
+    frontend_origin = os.environ.get('FRONTEND_ORIGIN', '').strip()
+
     if allowed:
         # Usar lista explícita si se proporciona
         return [o.strip() for o in allowed.split(',') if o.strip()]
-    
+
+    extra_origins = [o for o in [frontend_url, frontend_origin] if o]
+
     # Detectar si está en producción (Render establece esta variable)
     if os.environ.get('RENDER') == 'true':
-        # En Render: permitir solo el dominio de producción
+        # En Render: permitir solo el dominio de producción y el frontend explícito
         render_domain = os.environ.get('RENDER_EXTERNAL_HOSTNAME', '')
+        origins = []
         if render_domain:
-            return [f'https://{render_domain}', f'https://www.{render_domain}']
+            origins.extend([f'https://{render_domain}', f'https://www.{render_domain}'])
+        origins.extend(extra_origins)
+        if origins:
+            return origins
         # Fallback seguro si no hay dominio configurado
         return ['https://localhost']
-    
+
     # En desarrollo local, permitir todos los orígenes
     return '*'
 
