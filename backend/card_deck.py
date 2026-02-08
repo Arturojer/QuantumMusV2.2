@@ -116,8 +116,6 @@ class QuantumCard:
             'coefficient_a': self.coefficient_a,
             'coefficient_b': self.coefficient_b
         }
-            'coefficient_b': self.coefficient_b
-        }
 
 
 class QuantumDeck:
