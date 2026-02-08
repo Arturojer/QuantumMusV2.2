@@ -159,7 +159,7 @@ class QuantumCard:
         
         return self.collapsed_value
     
-    def to_dict(self)::
+    def to_dict(self):
         """Convert card to dictionary"""
         return {
             'value': self.value,
