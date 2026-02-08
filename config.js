@@ -1,24 +1,28 @@
 /**
- * Configuración del servidor para Quantum Mus
- * Detecta automáticamente la URL del backend para funcionar en local y en producción
+ * Configuración centralizada del servidor - Quantum Mus
+ *
+ * Orden de prioridad para la URL del backend:
+ * 1. window.QUANTUM_MUS_SERVER_URL (override manual o inyectado en producción)
+ * 2. config.override.js (archivo opcional que define QUANTUM_MUS_SERVER_URL)
+ * 3. window.location.origin (mismo dominio que la página; funciona en local y producción)
+ *
+ * Para producción en otro dominio: edita config.override.js o define
+ * QUANTUM_MUS_SERVER_URL antes de cargar este script.
  */
 (function(global) {
   'use strict';
 
   function getServerUrl() {
-    // Si hay una variable global configurada (útil para override en producción)
-    if (global.QUANTUM_MUS_SERVER_URL) {
-      return global.QUANTUM_MUS_SERVER_URL;
+    if (global.QUANTUM_MUS_SERVER_URL && String(global.QUANTUM_MUS_SERVER_URL).trim() !== '') {
+      return String(global.QUANTUM_MUS_SERVER_URL).replace(/\/$/, ''); // sin barra final
     }
-    // Cuando el frontend se sirve desde el mismo servidor que el backend,
-    // usar el origen actual (funciona en localhost y en producción)
-    const origin = window.location.origin;
-    return origin;
+    var origin = (global.location && global.location.origin) ? global.location.origin : '';
+    return origin || '';
   }
 
   function isOnlineModeAvailable() {
-    // En modo file:// no hay servidor
-    return window.location.protocol !== 'file:';
+    if (!global.location || !global.location.protocol) return false;
+    return global.location.protocol !== 'file:';
   }
 
   global.QuantumMusConfig = {

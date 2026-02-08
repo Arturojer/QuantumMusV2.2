@@ -5,7 +5,7 @@
 El juego está preparado para funcionar online. Se han realizado las siguientes modificaciones:
 
 ### Frontend
-- **config.js**: Detecta automáticamente la URL del servidor (funciona en local y producción)
+- **config.js** + **config.override.js**: URL del servidor centralizada. Por defecto usa el mismo origen que la página (localhost o tu dominio). Para producción con backend en otra URL, edita solo `config.override.js` (ver más abajo).
 - **Socket.IO**: Integrado para comunicación en tiempo real
 - **Navegación**: Crear/unir salas, lobby con jugadores en tiempo real, selección de personaje
 - **Juego**: Sincronización de estado y acciones con el servidor
@@ -67,6 +67,21 @@ gunicorn --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker -
 ```
 
 **Nota:** El frontend debe servirse desde el mismo dominio para evitar problemas de CORS con WebSockets. Si el frontend está en otro dominio, configura `CORS_ORIGINS` en el backend.
+
+## Cambiar la URL del servidor (frontend → backend)
+
+Toda la conexión al backend (WebSocket y API) usa una **configuración centralizada**. No hay URLs tipo `localhost` repartidas por el código.
+
+- **Mismo dominio (recomendado):** Si sirves el frontend y el backend desde el mismo dominio (p. ej. `https://midominio.com` para la web y `https://midominio.com` para el API), no hace falta cambiar nada. El cliente usa `window.location.origin` automáticamente.
+- **Backend en otra URL:** Edita **solo** el archivo `config.override.js` en la raíz del proyecto:
+  1. Abre `config.override.js`.
+  2. Descomenta la línea que define `QUANTUM_MUS_SERVER_URL` y pon la URL base de tu backend (sin barra final), por ejemplo:
+     ```js
+     window.QUANTUM_MUS_SERVER_URL = 'https://api.midominio.com';
+     ```
+  3. Asegura CORS en el backend para ese origen (frontend).
+
+Así puedes subir el proyecto a internet y cambiar la dirección del servidor en un solo sitio sin tocar el resto del código.
 
 ## Códigos de sala
 

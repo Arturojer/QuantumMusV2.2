@@ -1,8 +1,25 @@
-Flask==3.0.0
+# Quantum Mus Backend - Python dependencies
+# Versiones fijas para despliegue estable en Linux/servidor online.
+# server.py: Flask, Flask-CORS, Flask-SocketIO, Flask-SQLAlchemy (models.py)
+
+# Core Flask
+Flask==3.0.2
+Werkzeug>=3.0.0,<4
+
+# CORS (server.py)
 Flask-CORS==4.0.0
-Flask-SocketIO==5.3.5
-Flask-SQLAlchemy==3.1.1
+
+# WebSocket / tiempo real (server.py)
+Flask-SocketIO==5.3.6
 python-socketio==5.10.0
 python-engineio==4.8.0
-SQLAlchemy==2.0.23
+
+# Base de datos (server.py, models.py)
+Flask-SQLAlchemy==3.1.1
+SQLAlchemy==2.0.25
+
+# Servidor WSGI para Procfile / producción (Socket.IO con eventlet)
+gunicorn==23.0.0
+
+# Worker asíncrono para gunicorn: necesario para Socket.IO en tiempo real
 eventlet==0.33.3

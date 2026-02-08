@@ -13,6 +13,15 @@ from datetime import datetime
 # Directorio del frontend (padre del backend) para servir archivos estáticos
 FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
+# CORS: orígenes permitidos (variable de entorno ALLOWED_ORIGINS; por defecto "*" para no bloquear en pruebas)
+def _get_cors_origins():
+    raw = os.environ.get('ALLOWED_ORIGINS', '*').strip()
+    if not raw or raw == '*':
+        return '*'
+    return [o.strip() for o in raw.split(',') if o.strip()]
+
+CORS_ORIGINS = _get_cors_origins()
+
 # Import game modules
 from game_manager import GameManager
 from room_manager import RoomManager
@@ -28,11 +37,11 @@ app.config['SECRET_KEY'] = 'quantum-mus-secret-2026'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///quantum_mus.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Enable CORS
-CORS(app, resources={r"/*": {"origins": "*"}})
+# Enable CORS (Flask HTTP) usando ALLOWED_ORIGINS
+CORS(app, resources={r"/*": {"origins": CORS_ORIGINS}})
 
-# Initialize Socket.IO
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+# Initialize Socket.IO (WebSocket) con los mismos orígenes permitidos
+socketio = SocketIO(app, cors_allowed_origins=CORS_ORIGINS, async_mode='threading')
 
 # Initialize database
 db.init_app(app)
@@ -396,9 +405,9 @@ def handle_play_card_with_entanglement(data):
 # ==================== RUN SERVER ====================
 
 if __name__ == '__main__':
-    import os
     host = os.environ.get('HOST', '0.0.0.0')
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
     logger.info(f"Starting Quantum Mus server on {host}:{port} (debug={debug})...")
+    logger.info("CORS allowed origins: " + ("* (all)" if CORS_ORIGINS == "*" else str(CORS_ORIGINS)))
     socketio.run(app, host=host, port=port, debug=debug)
