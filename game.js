@@ -455,6 +455,43 @@ function initGame() {
   // Create central scoreboard
   createScoreboard();
 
+  // Function to initialize local deck and deal cards (for demo mode)
+  function initializeLocalGameDeck() {
+    const values = ['A', '2', '3', '4', '5', '6', '7', 'J', 'Q', 'K'];
+    const suits = ['oros', 'copas', 'espadas', 'bastos'];
+    
+    // Create deck
+    const deck = [];
+    suits.forEach(suit => {
+      values.forEach(value => {
+        deck.push({ value, suit });
+      });
+    });
+    
+    // Shuffle deck
+    for (let i = deck.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [deck[i], deck[j]] = [deck[j], deck[i]];
+    }
+    
+    // Deal 4 cards to player 1 (local player)
+    const player1Hand = deck.slice(0, 4);
+    
+    // Update player 1 cards display
+    const handContainer = document.querySelector('#player1-zone .cards-row');
+    if (handContainer) {
+      handContainer.innerHTML = '';
+      const suitMap = { oros: ['theta', 'θ', '#f5c518'], copas: ['phi', 'φ', '#ff6b6b'], espadas: ['delta', 'δ', '#a78bfa'], bastos: ['psi', 'ψ', '#2ec4b6'] };
+      player1Hand.forEach((c, i) => {
+        const s = suitMap[c.suit] || suitMap.oros;
+        const card = createCard(c.value, s[0], s[1], i, true, false, s[2], 0, gameMode);
+        if (card) handContainer.appendChild(card);
+      });
+    }
+    
+    return deck;
+  }
+
   if (isOnline && window.QuantumMusSocket && window.QuantumMusOnlineRoom) {
     const socket = window.QuantumMusSocket;
     const roomId = window.QuantumMusOnlineRoom;
@@ -496,6 +533,9 @@ function initGame() {
         window.showGameOver(winnerTeam, { team1: fs.team1 || 0, team2: fs.team2 || 0 }, { rounds: 0 });
       }
     });
+  } else {
+    // Mode local (demo): Initialize local game deck
+    initializeLocalGameDeck();
   }
 
   // Animación del reparto de cartas al inicio del turno

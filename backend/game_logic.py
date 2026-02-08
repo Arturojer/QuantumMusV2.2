@@ -17,7 +17,16 @@ class QuantumMusGame:
     def __init__(self, room_id, players, game_mode='4'):
         self.room_id = room_id
         self.players = players  # List of player dicts
+        
+        # Validate game_mode
+        if game_mode not in ['4', '8']:
+            logger.warning(f"Invalid game_mode '{game_mode}', defaulting to '4'")
+            game_mode = '4'
         self.game_mode = game_mode
+        
+        # Validate players
+        if len(players) != 4:
+            logger.warning(f"Expected 4 players, got {len(players)}")
         
         # Game state
         self.state = {
@@ -75,29 +84,71 @@ class QuantumMusGame:
     
     def deal_cards(self):
         """Deal 4 cards to each player"""
+        # Validate deck has enough cards
+        if len(self.deck.cards) < 16:  # 4 cards * 4 players
+            logger.error(f"Insufficient cards in deck: {len(self.deck.cards)}")
+            return {'success': False, 'error': 'Insufficient cards in deck'}
+        
+        # Deal cards
         for player_idx in range(4):
             self.hands[player_idx] = self.deck.deal(4)
+            if not self.hands[player_idx] or len(self.hands[player_idx]) != 4:
+                logger.error(f"Failed to deal 4 cards to player {player_idx}")
+                return {'success': False, 'error': f'Failed to deal cards to player {player_idx}'}
         
         logger.info(f"Dealt cards to all players in game {self.room_id}")
+        return {'success': True}
     
     def deal_new_cards(self):
         """Deal new cards to replace discarded ones"""
-        for player_idx, card_indices in self.state['cardsDiscarded'].items():
-            # Remove old cards
-            for idx in sorted(card_indices, reverse=True):
-                if idx < len(self.hands[player_idx]):
-                    self.hands[player_idx].pop(idx)
+        if not self.state['waitingForDiscard']:
+            logger.error(f"deal_new_cards called when not waiting for discard")
+            return {'success': False, 'error': 'Not waiting for discard'}
+        
+        # Validate all 4 players have discarded
+        if len(self.state['cardsDiscarded']) != 4:
+            logger.warning(f"deal_new_cards called with only {len(self.state['cardsDiscarded'])}/4 players ready")
+            return {'success': False, 'error': f'Not all players ready: {len(self.state["cardsDiscarded"])}/4'}
+        
+        try:
+            for player_idx, card_indices in self.state['cardsDiscarded'].items():
+                # Validate card indices
+                if not isinstance(card_indices, list) or len(card_indices) > 4:
+                    logger.error(f"Invalid discard for player {player_idx}: {card_indices}")
+                    return {'success': False, 'error': f'Invalid card indices for player {player_idx}'}
+                
+                # Remove old cards (in reverse order to maintain proper indices)
+                for idx in sorted(card_indices, reverse=True):
+                    if idx < len(self.hands[player_idx]):
+                        self.hands[player_idx].pop(idx)
+                    else:
+                        logger.warning(f"Card index {idx} out of range for player {player_idx}")
+                
+                # Deal new cards
+                num_new = len(card_indices)
+                new_cards = self.deck.deal(num_new)
+                if not new_cards or len(new_cards) != num_new:
+                    logger.error(f"Failed to deal {num_new} cards to player {player_idx}")
+                    return {'success': False, 'error': f'Insufficient cards in deck'}
+                
+                self.hands[player_idx].extend(new_cards)
             
-            # Deal new cards
-            num_new = len(card_indices)
-            new_cards = self.deck.deal(num_new)
-            self.hands[player_idx].extend(new_cards)
-        
-        # Reset discard state
-        self.state['cardsDiscarded'] = {}
-        self.state['waitingForDiscard'] = False
-        
-        logger.info(f"Dealt new cards in game {self.room_id}")
+            # Validate all players still have 4 cards
+            for player_idx in range(4):
+                if len(self.hands[player_idx]) != 4:
+                    logger.error(f"Player {player_idx} has {len(self.hands[player_idx])} cards after deal (should be 4)")
+                    return {'success': False, 'error': f'Card count mismatch for player {player_idx}'}
+            
+            # Reset discard state
+            self.state['cardsDiscarded'] = {}
+            self.state['waitingForDiscard'] = False
+            self.state['roundActions'] = {}  # Reset so MUS round starts fresh
+            
+            logger.info(f"Successfully dealt new cards in game {self.room_id}")
+            return {'success': True}
+        except Exception as e:
+            logger.error(f"Error dealing new cards: {e}")
+            return {'success': False, 'error': str(e)}
     
     def process_action(self, player_index, action, extra_data=None):
         """Process a player action"""
@@ -202,10 +253,18 @@ class QuantumMusGame:
     
     def start_new_hand(self):
         """Start a new hand"""
+        # Validate current state before resetting
+        if self.state['currentRound'] not in ['MUS', 'GRANDE', 'CHICA', 'PARES', 'JUEGO']:
+            logger.warning(f"Invalid round state before new hand: {self.state['currentRound']}")
+        
+        # Rotate mano to next player (counter-clockwise)
+        old_mano = self.state['manoIndex']
+        self.state['manoIndex'] = (self.state['manoIndex'] + 3) % 4  # Same as +1 but explicit
+        self.state['activePlayerIndex'] = self.state['manoIndex']
+        
+        # Reset round state
         self.state['currentRound'] = 'MUS'
         self.state['musPhaseActive'] = True
-        self.state['manoIndex'] = (self.state['manoIndex'] + 1) % 4
-        self.state['activePlayerIndex'] = self.state['manoIndex']
         self.reset_round_state()
         
         # Reset phase states
@@ -214,16 +273,24 @@ class QuantumMusGame:
         self.state['paresPhase'] = None
         self.state['juegoPhase'] = None
         self.state['deferredResults'] = []
+        self.state['cardsDiscarded'] = {}
+        self.state['waitingForDiscard'] = False
         
-        # Reset entanglement for new hand
+        # Reset entanglement for new hand (BEFORE creating new deck)
         self.reset_entanglement_for_new_hand()
         
-        # Deal new cards
+        # Create new deck and shuffle
         self.deck = QuantumDeck(self.game_mode)
         self.deck.shuffle()
-        self.deal_cards()
         
-        logger.info(f"Started new hand, mano: {self.state['manoIndex']}")
+        # Deal new cards
+        deal_result = self.deal_cards()
+        if not deal_result['success']:
+            logger.error(f"Failed to deal cards for new hand: {deal_result['error']}")
+            return deal_result
+        
+        logger.info(f"Started new hand in game {self.room_id}: mano rotated from {old_mano} to {self.state['manoIndex']}")
+        return {'success': True}
     
     def _resolve_deferred_comparisons(self):
         """

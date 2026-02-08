@@ -279,11 +279,35 @@ def handle_start_game(data):
     game = game_manager.create_game(room_id, room['players'], room['game_mode'])
     
     # Deal initial cards
-    game.deal_cards()
+    deal_result = game.deal_cards()
+    if not deal_result['success']:
+        emit('game_error', {'error': deal_result.get('error', 'Failed to deal cards')})
+        game_manager.remove_game(room_id)
+        return
     
-    # Notify all players
+    # Build comprehensive game state with all player hands
+    game_state = game.get_public_state()
+    
+    # Add player-specific hands for each player
+    game_state['player_hands'] = {
+        i: [card.to_dict() for card in game.hands.get(i, [])]
+        for i in range(4)
+    }
+    
+    # Add mano index explicitly
+    game_state['manoIndex'] = game.state['manoIndex']
+    
+    # Add initial entanglement state
+    game_state['entanglement'] = game.get_full_entanglement_state()
+    
+    # Log game start
+    logger.info(f"Game started in room {room_id}, mode: {room['game_mode']}, mano: {game.state['manoIndex']}")
+    
+    # Notify all players with complete initial state
     socketio.emit('game_started', {
-        'game_state': game.get_public_state()
+        'success': True,
+        'game_state': game_state,
+        'game_mode': room['game_mode']
     }, room=room_id)
 
 @socketio.on('player_action')
@@ -342,26 +366,76 @@ def handle_discard_cards(data):
     
     game = game_manager.get_game(room_id)
     if not game:
+        logger.error(f"Game not found for room {room_id}")
         emit('game_error', {'error': 'Game not found'})
         return
     
+    # Validate player index
+    if not isinstance(player_index, int) or player_index < 0 or player_index > 3:
+        logger.error(f"Invalid player_index in discard: {player_index}")
+        emit('game_error', {'error': 'Invalid player index'})
+        return
+    
+    # Validate not in discard phase
+    if not game.state['waitingForDiscard']:
+        logger.warning(f"Player {player_index} tried to discard outside discard phase")
+        emit('game_error', {'error': 'Not in discard phase'})
+        return
+    
+    # Validate card indices (must be 0-4 cards)
+    if not isinstance(card_indices, list):
+        logger.error(f"Invalid card_indices format for player {player_index}")
+        emit('game_error', {'error': 'Invalid card indices format'})
+        return
+    
+    if len(card_indices) > 4:
+        logger.warning(f"Player {player_index} tried to discard {len(card_indices)} cards (max 4)")
+        emit('game_error', {'error': 'Cannot discard more than 4 cards'})
+        return
+    
+    if any(not isinstance(idx, int) or idx < 0 or idx > 3 for idx in card_indices):
+        logger.error(f"Invalid card index in list for player {player_index}")
+        emit('game_error', {'error': 'Invalid card index'})
+        return
+    
+    # Validate player hasn't already discarded
+    if player_index in game.state['cardsDiscarded']:
+        logger.warning(f"Player {player_index} tried to discard twice")
+        emit('game_error', {'error': 'You have already discarded'})
+        return
+    
+    # Process discard
     result = game.discard_cards(player_index, card_indices)
     
     if result['success']:
-        # Notify all players
+        logger.info(f"Player {player_index} discarded {len(card_indices)} cards in room {room_id}")
+        
+        # Notify all players with card dealer info (num cards only, not indices)
         socketio.emit('cards_discarded', {
             'player_index': player_index,
             'num_cards': len(card_indices),
             'game_state': game.get_public_state()
         }, room=room_id)
         
-        # If all players discarded, deal new cards
+        # If all players discarded, deal new cards and send to all
         if result.get('all_discarded'):
-            game.deal_new_cards()
-            socketio.emit('new_cards_dealt', {
-                'game_state': game.get_public_state()
-            }, room=room_id)
+            logger.info(f"All players discarded in room {room_id} - dealing new cards")
+            deal_result = game.deal_new_cards()
+            if deal_result and deal_result.get('success'):
+                # Send new game state to all players (includes new cards)
+                socketio.emit('new_cards_dealt', {
+                    'success': True,
+                    'game_state': game.get_public_state(),
+                    'player_hands': {
+                        i: [card.to_dict() for card in game.hands.get(i, [])]
+                        for i in range(4)
+                    }
+                }, room=room_id)
+            else:
+                logger.error(f"Failed to deal new cards in room {room_id}")
+                socketio.emit('game_error', {'error': 'Failed to deal new cards'}, room=room_id)
     else:
+        logger.error(f"Discard failed for player {player_index}: {result.get('error')}")
         emit('game_error', {'error': result.get('error', 'Failed to discard')})
 
 @socketio.on('get_game_state')

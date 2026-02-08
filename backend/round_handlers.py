@@ -19,6 +19,27 @@ class RoundHandler:
     
     def handle_mus_round(self, player_index, action, extra_data=None):
         """Handle MUS round actions"""
+        # Validate player index
+        if not isinstance(player_index, int) or player_index < 0 or player_index > 3:
+            logger.error(f"Invalid player_index: {player_index}")
+            return {'success': False, 'error': 'Invalid player index'}
+        
+        # Validate action
+        valid_actions = ['mus', 'paso', 'envido', 'ordago']
+        if action not in valid_actions:
+            logger.error(f"Invalid action: {action}")
+            return {'success': False, 'error': f'Invalid action: {action}'}
+        
+        # Validate it's this player's turn
+        if self.game.state['activePlayerIndex'] != player_index:
+            logger.warning(f"Player {player_index} tried to act out of turn (active: {self.game.state['activePlayerIndex']})")
+            return {'success': False, 'error': 'Not your turn'}
+        
+        # Validate player hasn't already acted this round
+        if player_index in self.game.state['roundActions']:
+            logger.warning(f"Player {player_index} tried to act twice in MUS round")
+            return {'success': False, 'error': 'You have already acted this round'}
+        
         self.game.state['roundActions'][player_index] = action
         
         if action == 'mus':
