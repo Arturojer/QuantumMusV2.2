@@ -315,28 +315,22 @@ function resetEntanglementForNewHand() {
   gameState.entanglement.playerEntanglements = {};
 }
 
-function addQuantumGateDecorations() {
-  const gates = [
-    { type: 'H', className: 'gate-h-bg', top: '15%', left: '20%' },
-    { type: 'H', className: 'gate-h-bg', top: '35%', left: '65%' },
-    { type: 'H', className: 'gate-h-bg', top: '70%', left: '85%' },
-    { type: '', className: 'gate-cnot-bg', top: '40%', left: '35%' },
-    { type: '', className: 'gate-cnot-bg', top: '60%', left: '55%' },
-    { type: 'M', className: 'gate-m-bg', top: '75%', left: '40%' },
-    { type: 'M', className: 'gate-m-bg', top: '25%', left: '80%' }
-  ];
-  gates.forEach(gate => {
-    const gateEl = document.createElement('div');
-    gateEl.className = `quantum-gate-bg ${gate.className}`;
-    gateEl.style.top = gate.top;
-    gateEl.style.left = gate.left;
-    gateEl.textContent = gate.type;
-    document.body.appendChild(gateEl);
-  });
-}
-
 function initGame() {
   console.log('initGame called, gameInitialized:', gameInitialized);
+
+  // If the client set a start timestamp, compute and log the client-side init latency
+  try {
+    const now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+    const start = window._create_start_ts;
+    if (start) {
+      const deltaMs = Math.round(now - start);
+      console.log(`[client] initGame started after ${deltaMs}ms from startGame click`);
+      // Expose last measured client init latency
+      window._last_client_init_ms = deltaMs;
+    }
+  } catch (e) {
+    // ignore
+  }
   
   const gameContainer = document.getElementById('game-container');
   if (!gameContainer) {
@@ -358,11 +352,51 @@ function initGame() {
   
   // Clear any previous content
   gameContainer.innerHTML = '';
+
+  // Quick loading overlay to improve perceived responsiveness
+  try {
+    const loadingOverlay = document.createElement('div');
+    loadingOverlay.id = 'game-loading-overlay';
+    loadingOverlay.style.position = 'absolute';
+    loadingOverlay.style.top = '0';
+    loadingOverlay.style.left = '0';
+    loadingOverlay.style.width = '100%';
+    loadingOverlay.style.height = '100%';
+    loadingOverlay.style.display = 'flex';
+    loadingOverlay.style.alignItems = 'center';
+    loadingOverlay.style.justifyContent = 'center';
+    loadingOverlay.style.background = 'rgba(0,0,0,0.35)';
+    loadingOverlay.style.zIndex = '9999';
+    loadingOverlay.innerHTML = '<div style="color:#fff;font-size:18px;padding:12px 18px;border-radius:8px;background:rgba(0,0,0,0.6);">Cargando partida…</div>';
+    gameContainer.appendChild(loadingOverlay);
+    // Remove overlay after expected deal animation completes (~3.5s)
+    setTimeout(() => { try { loadingOverlay.remove(); } catch (e) {} }, 3500);
+  } catch (e) {
+    // ignore failures in diagnostics code
+  }
   
   // Get players and game mode from lobby (set by initializeGame)
   const lobbyPlayers = window.currentPlayers || [];
   const gameMode = window.currentGameMode || '4';
-  const localPlayerIndex = window.currentLocalPlayerIndex ?? 0;
+  let localPlayerIndex = window.currentLocalPlayerIndex ?? 0;
+  
+  // Validate game mode
+  if (!['4', '8'].includes(gameMode)) {
+    console.error('Invalid game mode:', gameMode);
+    return;
+  }
+  
+  // Validate players count
+  if (lobbyPlayers.length !== 4) {
+    console.error('Expected 4 players, got', lobbyPlayers.length);
+    return;
+  }
+  
+  // Validate local player index
+  if (!Number.isInteger(localPlayerIndex) || localPlayerIndex < 0 || localPlayerIndex > 3) {
+    console.error('Invalid local player index:', localPlayerIndex);
+    localPlayerIndex = 0;
+  }
   
   console.log('Game Mode:', gameMode);
   console.log('Lobby Players:', lobbyPlayers);
@@ -401,42 +435,27 @@ function initGame() {
   // Store character keys so UI helpers can access character color values later
   gameState.playerCharacters = players.map(p => p.character);
   
-  // Reset or apply server state
-  const isOnline = window.onlineMode && window.initialServerState && window.QuantumMusSocket;
-  const localIdx = localPlayerIndex;
-  if (isOnline) {
-    const st = (window.initialServerState.state || window.initialServerState) || {};
-    gameState.currentRound = st.currentRound || 'MUS';
-    gameState.musPhaseActive = gameState.currentRound === 'MUS';
-    gameState.activePlayerIndex = ((st.activePlayerIndex ?? 0) - localIdx + 4) % 4;
-    gameState.manoIndex = ((st.manoIndex ?? 0) - localIdx + 4) % 4;
-    if (st.teams) {
-      gameState.teams.team1.score = st.teams.team1?.score ?? 0;
-      gameState.teams.team2.score = st.teams.team2?.score ?? 0;
-    }
-    gameState.currentBet = st.currentBet || { amount: 0, bettingTeam: null, betType: null, responses: {} };
-    gameState.waitingForDiscard = st.waitingForDiscard || false;
-    window.QuantumMusOnlineRoom = window.roomId;
-    window.QuantumMusLocalIndex = localIdx;
-  }
-  gameState.handsPlayed = isOnline ? gameState.handsPlayed : 0;
-  if (!isOnline) {
-    gameState.teams.team1.score = gameState.teams.team1.score ?? 0;
-    gameState.teams.team2.score = gameState.teams.team2.score ?? 0;
-  }
-  gameState.manoIndex = gameState.manoIndex ?? 0;
+  // Reset game state counters
+  gameState.handsPlayed = 0;
+  gameState.teams.team1.score = 0;
+  gameState.teams.team2.score = 0;
+  // Initialize mano index - will be synced from server for online games
+  gameState.manoIndex = 0;
   window.startingPlayer = `player1`;
+  gameState.currentRound = 'MUS';
+  gameState.musPhaseActive = true;
+  gameState.activePlayerIndex = gameState.manoIndex;
+  // Store local player index globally for all game functions
+  window.localPlayerIndex = localPlayerIndex;
+  // Clear transient round state to ensure dynamics start clean
   gameState.roundActions = {};
-  gameState.cardsDiscarded = gameState.cardsDiscarded || {};
-  gameState.pendingPoints = { team1: { GRANDE: 0, CHICA: 0, PARES: 0, JUEGO: 0 }, team2: { GRANDE: 0, CHICA: 0, PARES: 0, JUEGO: 0 } };
+  gameState.currentBet = { amount: 0, bettingTeam: null, betType: null, responses: {} };
+  gameState.cardsDiscarded = {};
+  gameState.waitingForDiscard = false;
   gameState.paresDeclarations = undefined;
   gameState.juegoDeclarations = undefined;
   gameState.preJuegoDeclarations = null;
-  if (!isOnline) {
-    gameState.teams.team1.score = 0;
-    gameState.teams.team2.score = 0;
-    gameState.activePlayerIndex = gameState.manoIndex;
-  }
+  gameState.pendingPoints = { team1: { GRANDE: 0, CHICA: 0, PARES: 0, JUEGO: 0 }, team2: { GRANDE: 0, CHICA: 0, PARES: 0, JUEGO: 0 } };
   console.log('Mano set to player index:', gameState.manoIndex, '(', `player${gameState.manoIndex + 1}`, ')');
   
   // Add quantum gate decorations to background
@@ -495,18 +514,42 @@ function initGame() {
   if (isOnline && window.QuantumMusSocket && window.QuantumMusOnlineRoom) {
     const socket = window.QuantumMusSocket;
     const roomId = window.QuantumMusOnlineRoom;
-    socket.emit('get_game_state', { room_id: roomId, player_index: localIdx });
-    socket.once('game_state', (data) => {
-      if (data.game_state && data.game_state.my_hand) {
+    
+    // Listen for game start with initial cards and state from server
+    socket.once('game_started', (data) => {
+      console.log('[INIT] Received game_started event');
+      
+      if (!data.success) {
+        console.error('Game start failed:', data.error || 'Unknown error');
+        return;
+      }
+      
+      const gameStateData = data.game_state || {};
+      
+      // Sync mano index from server
+      if (typeof gameStateData.manoIndex === 'number') {
+        gameState.manoIndex = gameStateData.manoIndex;
+        gameState.activePlayerIndex = gameState.manoIndex;
+        console.log('[INIT] Synced mano index from server:', gameState.manoIndex);
+      }
+      
+      // Update entanglement state if available
+      if (gameStateData.entanglement) {
+        updateEntanglementState(gameStateData.entanglement);
+      }
+      
+      // Display player's initial hand
+      if (gameStateData.player_hands && gameStateData.player_hands[localPlayerIndex]) {
         const handContainer = document.querySelector('#player1-zone .cards-row');
         if (handContainer) {
           handContainer.innerHTML = '';
           const suitMap = { oros: ['theta', 'θ', '#f5c518'], copas: ['phi', 'φ', '#ff6b6b'], espadas: ['delta', 'δ', '#a78bfa'], bastos: ['psi', 'ψ', '#2ec4b6'] };
-          data.game_state.my_hand.forEach((c, i) => {
+          gameStateData.player_hands[localPlayerIndex].forEach((c, i) => {
             const s = suitMap[c.suit] || suitMap.oros;
             const card = createCard(c.value, s[0], s[1], i, true, false, s[2], 0, gameMode);
             if (card) handContainer.appendChild(card);
           });
+          console.log('[INIT] Dealt initial cards to local player');
         }
       }
     });
@@ -515,7 +558,7 @@ function initGame() {
       const st = gs.state || gs;
       if (st) {
         gameState.currentRound = st.currentRound || gameState.currentRound;
-        gameState.activePlayerIndex = ((st.activePlayerIndex ?? 0) - localIdx + 4) % 4;
+        gameState.activePlayerIndex = ((st.activePlayerIndex ?? 0) - localPlayerIndex + 4) % 4;
         if (st.teams) {
           gameState.teams.team1.score = st.teams.team1?.score ?? 0;
           gameState.teams.team2.score = st.teams.team2?.score ?? 0;
@@ -526,6 +569,21 @@ function initGame() {
         startPlayerTurnTimer(gameState.activePlayerIndex);
       }
     });
+
+    // Server broadcasts updates specific to the GRANDE betting phase
+    socket.on('grande_phase_update', (data) => {
+      console.log('[SOCKET] grande_phase_update', data);
+      const gp = data.grande_phase || data;
+      if (!gp) return;
+      gameState.currentBet = gp.currentBet || gameState.currentBet;
+      gameState.currentRound = gp.currentRound || gameState.currentRound;
+      if (typeof gp.activePlayerIndex === 'number') {
+        gameState.activePlayerIndex = ((gp.activePlayerIndex ?? 0) - localPlayerIndex + 4) % 4;
+      }
+      updateRoundDisplay();
+      updateScoreboard();
+      startPlayerTurnTimer(gameState.activePlayerIndex);
+    });
     socket.on('game_ended', (data) => {
       if (data.winner && typeof window.showGameOver === 'function') {
         const winnerTeam = data.winner === 'team1' ? 1 : 2;
@@ -533,9 +591,180 @@ function initGame() {
         window.showGameOver(winnerTeam, { team1: fs.team1 || 0, team2: fs.team2 || 0 }, { rounds: 0 });
       }
     });
+    // Listen for new cards after all players have discarded
+    socket.on('new_cards_dealt', (data) => {
+      console.log('[INIT] Received new_cards_dealt event');
+      if (!data.success) {
+        console.error('New cards deal failed:', data.error || 'Unknown error');
+        return;
+      }
+      // Update entanglement state if available
+      if (data.entanglement_state) {
+        updateEntanglementState(data.entanglement_state);
+        console.log('[INIT] Synced entanglement state after discard');
+      }
+      // Update all player hands with new cards
+      if (data.player_hands) {
+        // Update local player's visible hand
+        if (data.player_hands[localPlayerIndex]) {
+          const handContainer = document.querySelector('#player1-zone .cards-row');
+          if (handContainer) {
+            handContainer.innerHTML = '';
+            const suitMap = { oros: ['theta', 'θ', '#f5c518'], copas: ['phi', 'φ', '#ff6b6b'], espadas: ['delta', 'δ', '#a78bfa'], bastos: ['psi', 'ψ', '#2ec4b6'] };
+            data.player_hands[localPlayerIndex].forEach((c, i) => {
+              const s = suitMap[c.suit] || suitMap.oros;
+              const card = createCard(c.value, s[0], s[1], i, true, false, s[2], 0, gameMode);
+              if (card) handContainer.appendChild(card);
+            });
+            console.log('[INIT] Updated local player cards after discard');
+          }
+        }
+        // Other players' hands are managed by server-side card system
+        gameState.waitingForDiscard = false;
+        gameState.musPhaseActive = true;
+      }
+    });
+
+    // ==================== LISTENERS PARA EVENTOS CRÍTICOS DEL SERVIDOR ====================
+    
+    /**
+     * cards_discarded: Notificación cuando un jugador descarta cartas
+     * Criticidad: CRÍTICO - Feedback visual de descartes de otros jugadores
+     */
+    socket.on('cards_discarded', (data) => {
+      console.log('[SOCKET] cards_discarded event received:', data);
+      if (!data || typeof data.player_index !== 'number') {
+        console.warn('[SOCKET] Invalid cards_discarded data:', data);
+        return;
+      }
+      
+      const playerIdx = data.player_index;
+      const numCards = data.num_cards;
+      
+      // Marcar este jugador como habiéndose descartado
+      gameState.cardsDiscarded[playerIdx] = Array(numCards).fill(null);
+      console.log(`[SOCKET] Player ${playerIdx + 1} discarded ${numCards} cards. Discard state:`, Object.keys(gameState.cardsDiscarded).length, '/ 4');
+      
+      // Opcional: actualizar UI para mostrar feedback visual
+      // (p.ej., deshabilitar timer de ese jugador, mostrar "discarded" label)
+    });
+
+    /**
+     * round_ended: Notificación cuando una ronda termina
+     * Criticidad: CRÍTICO - Determina cuándo revelar cartas y asignar puntos
+     */
+    socket.on('round_ended', (data) => {
+      console.log('[SOCKET] round_ended event received:', data);
+      if (!data || !data.result) {
+        console.warn('[SOCKET] Invalid round_ended data:', data);
+        return;
+      }
+      
+      const roundResult = data.result;
+      console.log('[SOCKET] Round result:', roundResult);
+      
+      // Revelar todas las cartas para conteo
+      revealAllCards(true);
+      
+      // Esperar a que se revelen las cartas, luego asignar puntos
+      setTimeout(() => {
+        const winningTeam = roundResult.winner || roundResult.team;
+        const points = roundResult.points || 0;
+        
+        if (winningTeam && points > 0) {
+          gameState.teams[winningTeam].score += points;
+          console.log(`[SOCKET] ${winningTeam} awarded ${points} points`);
+          showTeamPointsNotification(winningTeam, points);
+        }
+        
+        updateScoreboard();
+        
+        // Mover a próxima ronda después de delay
+        setTimeout(() => {
+          moveToNextRound();
+        }, 2000);
+      }, 1000);
+    });
+
+    /**
+     * entanglement_activated: Notificación cuando se activa entrelazamiento cuántico
+     * Criticidad: IMPORTANTE - Animaciones y cambios de estado de pares
+     */
+    socket.on('entanglement_activated', (data) => {
+      console.log('[SOCKET] entanglement_activated event received:', data);
+      if (!data) {
+        console.warn('[SOCKET] Invalid entanglement_activated data');
+        return;
+      }
+      
+      const entData = data.entanglement_data || {};
+      const playerIdx = data.player_index;
+      const cardPlayed = data.card_played;
+      const round = data.round;
+      
+      console.log(`[SOCKET] Pair activation: Player ${playerIdx + 1} in round ${round}`, entData);
+      
+      // Registrar evento de activación
+      if (!gameState.entanglement.events) {
+        gameState.entanglement.events = [];
+      }
+      gameState.entanglement.events.push({
+        timestamp: Date.now(),
+        playerIndex: playerIdx,
+        pairId: entData.pair_id,
+        result: entData.result,
+        round: round
+      });
+      
+      // Mostrar animación y notificación (opcional)
+      // showEntanglementActivationMessage(`Pareja ${entData.pair_id} activada!`);
+    });
+
+    /**
+     * entanglement_state: Estado actual de todos los pares entrelazados
+     * Criticidad: IMPORTANTE - Sincronización de estado de entrelazamiento
+     */
+    socket.on('entanglement_state', (data) => {
+      console.log('[SOCKET] entanglement_state event received:', data);
+      if (!data || !data.entanglement) {
+        console.warn('[SOCKET] Invalid entanglement_state data');
+        return;
+      }
+      
+      // Actualizar estado de entrelazamiento global
+      const entanglement = data.entanglement;
+      gameState.entanglement.pairs = entanglement.pairs || [];
+      gameState.entanglement.statistics = entanglement.statistics || gameState.entanglement.statistics;
+      
+      console.log('[SOCKET] Entanglement state updated:', {
+        pairs: gameState.entanglement.pairs.length,
+        activatedPairs: gameState.entanglement.events.length
+      });
+    });
+
+    /**
+     * player_entanglement_info: Información de pares entrelazados específicos de un jugador
+     * Criticidad: IMPORTANTE - Información para decisiones del jugador
+     */
+    socket.on('player_entanglement_info', (data) => {
+      console.log('[SOCKET] player_entanglement_info event received:', data);
+      if (!data || typeof data.player_index !== 'number') {
+        console.warn('[SOCKET] Invalid player_entanglement_info data');
+        return;
+      }
+      
+      const playerIdx = data.player_index;
+      const entangledCards = data.entangled_cards || [];
+      
+      // Almacenar información de pares entrelazados de este jugador
+      gameState.entanglement.playerEntanglements[playerIdx] = entangledCards;
+      
+      console.log(`[SOCKET] Player ${playerIdx + 1} entangled cards:`, entangledCards.length, 'cards');
+    });
+
   } else {
     // Mode local (demo): Initialize local game deck
-    initializeLocalGameDeck();
+    if (isOnline && window.QuantumMusSocket && window.QuantumMusOnlineRoom) {
   }
 
   // Animación del reparto de cartas al inicio del turno
@@ -810,16 +1039,6 @@ function initGame() {
 
   // Handle MUS round - players decide to mus or not
   function handleMusRound(playerIndex, action, extraData = {}) {
-    if (window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom) {
-      const serverIdx = (playerIndex + (window.QuantumMusLocalIndex || 0)) % 4;
-      window.QuantumMusSocket.emit('player_action', {
-        room_id: window.QuantumMusOnlineRoom,
-        player_index: serverIdx,
-        action: action,
-        data: extraData
-      });
-      return;
-    }
     console.log(`Player ${playerIndex + 1} chose: ${action}`);
     
     // Clear any pending timers to prevent double-execution
@@ -1019,6 +1238,18 @@ function initGame() {
     gameState.cardsDiscarded[playerIndex] = cardIndices;
     console.log(`[HANDLE DISCARD] Discard state:`, Object.keys(gameState.cardsDiscarded).length, '/ 4 players');
     
+    // Emit discard to server for multiplayer sync
+    if (isOnline && window.QuantumMusSocket && window.QuantumMusOnlineRoom) {
+      const socket = window.QuantumMusSocket;
+      const roomId = window.QuantumMusOnlineRoom;
+      console.log(`[HANDLE DISCARD] Emitting discard_cards to server for player ${playerIndex}`, cardIndices);
+      socket.emit('discard_cards', {
+        room_id: roomId,
+        player_index: playerIndex,
+        card_indices: cardIndices
+      });
+    }
+    
     // Check if all players have discarded
     if (Object.keys(gameState.cardsDiscarded).length === 4) {
       console.log('[HANDLE DISCARD] All players have discarded - dealing new cards');
@@ -1039,18 +1270,6 @@ function initGame() {
   
   // Handle betting round (Grande, Chica, Pares, Juego)
   function handleBettingRound(playerIndex, action, betAmount = 0) {
-    if (window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom) {
-      const serverIdx = (playerIndex + (window.QuantumMusLocalIndex || 0)) % 4;
-      const data = action === 'raise' || action === 'envido' ? { amount: betAmount } : {};
-      if (action === 'raise') action = 'envido';
-      window.QuantumMusSocket.emit('player_action', {
-        room_id: window.QuantumMusOnlineRoom,
-        player_index: serverIdx,
-        action: action,
-        data: data
-      });
-      return;
-    }
     console.log(`Player ${playerIndex + 1} in betting round ${gameState.currentRound}: ${action}, bet amount: ${betAmount}`);
     console.log(`[handleBettingRound] Handling locally`);
     
@@ -1739,10 +1958,7 @@ function initGame() {
   
   function proceedWithParesDeclaration() {
       // Process declarations for all players in order starting from current active player
-      // Prevent repeated declaration after transition
-      if (proceedWithParesDeclaration._locked) return;
       if (Object.keys(gameState.paresDeclarations).length === 4) {
-        proceedWithParesDeclaration._locked = true;
         // All players have declared - proceed to betting or next round
         handleAllParesDeclarationsDone();
         return;
@@ -1984,13 +2200,6 @@ function initGame() {
     } else {
       // In all other cases (nobody has PARES or only one team), proceed to JUEGO declaration
       console.log('Proceeding to JUEGO declaration phase after PARES');
-          // Safety: force transition to JUEGO if betting round stalls
-          setTimeout(() => {
-            if (gameState.currentRound === 'PARES') {
-              console.log('[SAFETY] Forcing transition to JUEGO after PARES betting');
-              moveToNextRound('JUEGO');
-            }
-          }, 15000); // 15 seconds safety timeout
 
       // Ensure juego declarations are reset and preserve any preJuegoDeclarations
       gameState.currentRound = 'JUEGO';
@@ -3143,19 +3352,21 @@ function initGame() {
       if (existingIndicator) {
         existingIndicator.remove();
       }
-      
+
       // Add mano indicator to current mano player
       if (i === gameState.manoIndex) {
         const avatar = zone.querySelector('.character-avatar');
         if (avatar) {
           const indicator = document.createElement('div');
-          indicator.className = 'atom-indicator';
+          indicator.className = 'atom-indicator mano-pulse';
           indicator.title = 'Mano - Comienza el juego';
           // Use stored character key (e.g. 'preskill') to get consistent color
           const characterKey = (gameState.playerCharacters && gameState.playerCharacters[i]) || null;
           const color = characterKey ? getCharacterColorValue(characterKey) : getPlayerColorValue(i);
           indicator.innerHTML = CardGenerator.generateAtomIndicator(color);
           avatar.appendChild(indicator);
+          // Remove the pulse class after animation so it only pulses on change
+          setTimeout(() => { indicator.classList.remove('mano-pulse'); }, 700);
         }
       }
     }
@@ -3468,7 +3679,6 @@ function initGame() {
   // Start timer for a single player with callback on timeout
   function startPlayerTurnTimer(index, duration = 10, onTimeout = null) {
     console.log(`[startPlayerTurnTimer] Starting turn for player ${index + 1}, Round: ${gameState.currentRound}`);
-    const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
 
     // If in PARES/JUEGO/PUNTO betting phases and this player cannot bet,
     // skip them immediately (no timer, no buttons) and move to next eligible.
@@ -3552,22 +3762,20 @@ function initGame() {
       aiDecisionTimeout = null;
     }
     
-    // Set timeout handler (offline/local only)
-    if (!isOnlineGame) {
-      timerInterval = setTimeout(() => {
-        // Timeout - auto action
-        if (onTimeout) {
-          onTimeout();
-        } else {
-          handleTimeout(index);
-        }
-      }, duration * 1000);
-    }
+    // Set timeout handler
+    timerInterval = setTimeout(() => {
+      // Timeout - auto action
+      if (onTimeout) {
+        onTimeout();
+      } else {
+        handleTimeout(index);
+      }
+    }, duration * 1000);
     
     console.log(`[startPlayerTurnTimer] Timer set for ${duration}s. Is AI player? ${index !== 0}`);
     
-    // If AI player, make decision (offline/local only)
-    if (!isOnlineGame && index !== 0) {
+    // If AI player, make decision
+    if (index !== 0) {
       console.log(`[startPlayerTurnTimer] Triggering AI decision for player ${index + 1}`);
       makeAIDecision(index);
     }
@@ -3639,7 +3847,6 @@ function initGame() {
   
   // Start all players' timers simultaneously
   function startAllPlayersTimer(duration = 10) {
-    const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
     // Show all timer bars for simultaneous play
     for (let i = 0; i < 4; i++) {
       const timerBar = document.querySelector(`#timer-bar-player${i + 1}`);
@@ -3661,39 +3868,35 @@ function initGame() {
     }
     
     if (timerInterval) clearTimeout(timerInterval);
-    if (!isOnlineGame) {
-      timerInterval = setTimeout(() => {
-        // All timers expired - auto discard all cards for players who haven't acted
-        handleAllPlayersTimeout();
-      }, duration * 1000);
-    }
+    timerInterval = setTimeout(() => {
+      // All timers expired - auto discard all cards for players who haven't acted
+      handleAllPlayersTimeout();
+    }, duration * 1000);
 
-    // Failsafe: set per-AI fallback timeouts in case AI-specific timeouts fail (offline/local only)
-    if (!isOnlineGame) {
-      try {
-        const localIdx = window.currentLocalPlayerIndex ?? 0;
-        gameState.autoDiscardTimeouts = gameState.autoDiscardTimeouts || {};
-        // Clear any previous per-AI timeouts first
-        Object.keys(gameState.autoDiscardTimeouts).forEach(k => {
-          try { clearTimeout(gameState.autoDiscardTimeouts[k]); } catch (e) {}
-          delete gameState.autoDiscardTimeouts[k];
-        });
-        for (let i = 0; i < 4; i++) {
-          if (i === localIdx) continue; // local player handled by UI
-          // Schedule a fallback discard slightly after the global timer
-          const id = setTimeout(() => {
-            try {
-              if (!gameState.cardsDiscarded || !gameState.cardsDiscarded[i]) {
-                console.log(`[FAILSAFE DISCARD] Auto-discarding player ${i + 1} (failsafe)`);
-                handleDiscard(i, [0,1,2,3]);
-              }
-            } catch (e) { console.warn('Failsafe discard failed', e); }
-          }, (duration * 1000) + 300);
-          gameState.autoDiscardTimeouts[i] = id;
-        }
-      } catch (e) {
-        console.warn('Failed to setup autoDiscardTimeouts', e);
+    // Failsafe: set per-AI fallback timeouts in case AI-specific timeouts fail (works across hands)
+    try {
+      const localIdx = window.currentLocalPlayerIndex ?? 0;
+      gameState.autoDiscardTimeouts = gameState.autoDiscardTimeouts || {};
+      // Clear any previous per-AI timeouts first
+      Object.keys(gameState.autoDiscardTimeouts).forEach(k => {
+        try { clearTimeout(gameState.autoDiscardTimeouts[k]); } catch (e) {}
+        delete gameState.autoDiscardTimeouts[k];
+      });
+      for (let i = 0; i < 4; i++) {
+        if (i === localIdx) continue; // local player handled by UI
+        // Schedule a fallback discard slightly after the global timer
+        const id = setTimeout(() => {
+          try {
+            if (!gameState.cardsDiscarded || !gameState.cardsDiscarded[i]) {
+              console.log(`[FAILSAFE DISCARD] Auto-discarding player ${i + 1} (failsafe)`);
+              handleDiscard(i, [0,1,2,3]);
+            }
+          } catch (e) { console.warn('Failsafe discard failed', e); }
+        }, (duration * 1000) + 300);
+        gameState.autoDiscardTimeouts[i] = id;
       }
+    } catch (e) {
+      console.warn('Failed to setup autoDiscardTimeouts', e);
     }
     
     // No immediate auto-discard. Only the 10s timer triggers auto-discard for all players.
@@ -3744,10 +3947,6 @@ function initGame() {
   // Handle timeout for a player
   function handleTimeout(playerIndex) {
     console.log(`[TIMEOUT] Player ${playerIndex + 1} in round ${gameState.currentRound}`);
-    if (window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom) {
-      console.warn('[TIMEOUT] Ignored in online mode (server authoritative)');
-      return;
-    }
     
     // Ensure we clear the AI decision timeout to prevent double execution
     if (aiDecisionTimeout) {
@@ -3783,10 +3982,6 @@ function initGame() {
   function makeAIDecision(playerIndex) {
     console.log(`[AI DECISION] Starting decision for player ${playerIndex + 1} in round ${gameState.currentRound}`);
     console.log(`[AI DECISION] Active player: ${gameState.activePlayerIndex + 1}, Expected: ${playerIndex + 1}`);
-    if (window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom) {
-      console.warn('[AI DECISION] Ignored in online mode');
-      return;
-    }
     
     // Clear any previous AI timeout to prevent duplicates
     if (aiDecisionTimeout) {
@@ -4685,7 +4880,7 @@ function initGame() {
     if (musBtn) musBtn.onclick = () => {
       if (gameState.activePlayerIndex === 0) {
         if (gameState.currentRound === 'MUS') {
-          handleMusRound(0, 'mus');
+          handleMusRound(gameState.activePlayerIndex, 'mus');
         } else if (gameState.currentRound === 'PARES' && !gameState.paresDeclarations.hasOwnProperty(0)) {
           handleParesDeclaration(0, true);
         } else if (gameState.currentRound === 'JUEGO' && !gameState.juegoDeclarations.hasOwnProperty(0)) {
@@ -4703,7 +4898,7 @@ function initGame() {
         } else if (gameState.currentRound === 'MUS') {
           showEnvidoModal((amount) => {
             gameState.currentBet.amount = amount;
-            handleMusRound(0, 'envido', { amount: amount });
+            handleMusRound(gameState.activePlayerIndex, 'envido', { amount: amount });
           });
         } else if (gameState.currentRound === 'GRANDE' || gameState.currentRound === 'CHICA' ||
                    gameState.currentRound === 'PARES' || gameState.currentRound === 'JUEGO' || gameState.currentRound === 'PUNTO') {
@@ -4723,7 +4918,7 @@ function initGame() {
         } else if (gameState.currentRound === 'JUEGO' && !gameState.juegoDeclarations.hasOwnProperty(0)) {
           handleJuegoDeclaration(0, 'puede');
         } else if (gameState.currentRound === 'MUS') {
-          handleMusRound(0, 'paso');
+          handleMusRound(gameState.activePlayerIndex, 'paso');
         } else {
           handleBettingRound(0, 'paso');
         }
@@ -4753,7 +4948,7 @@ function initGame() {
 
         if (gameState.activePlayerIndex === 0) {
           if (gameState.currentRound === 'MUS') {
-            handleMusRound(0, 'ordago');
+            handleMusRound(gameState.activePlayerIndex, 'ordago');
           } else {
             handleBettingRound(0, 'ordago');
           }
@@ -5950,11 +6145,16 @@ function initGame() {
   function showPenaltyNotification(playerIndex, roundName, penalty) {
     const notification = document.createElement('div');
     notification.className = 'penalty-notification';
+    const playerName = (gameState.playerActualNames && gameState.playerActualNames[playerIndex])
+      ? gameState.playerActualNames[playerIndex]
+      : (gameState.playerNames && gameState.playerNames[playerIndex])
+        ? gameState.playerNames[playerIndex]
+        : `Jugador ${playerIndex + 1}`;
     notification.innerHTML = `
       <div class="penalty-icon" style="font-size: 3rem; margin-bottom: 10px;">⚠️</div>
       <div class="penalty-text">
         <strong style="font-size: 1.5rem; color: #ff4444;">Predicción Incorrecta</strong><br>
-        <span style="font-size: 1.2rem; margin: 10px 0; display: block;">Jugador ${playerIndex + 1} - ${roundName}</span><br>
+        <span style="font-size: 1.2rem; margin: 10px 0; display: block;">${playerName} - ${roundName}</span><br>
         <span style="color: #ff4444; font-size: 2rem; font-weight: bold;">-${penalty} Punto${penalty > 1 ? 's' : ''}</span>
       </div>
     `;
