@@ -1,3 +1,12 @@
+@keyframes mano-pulse {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(46,196,182,0.7); }
+  50% { transform: scale(1.25); box-shadow: 0 0 16px 8px rgba(46,196,182,0.3); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(46,196,182,0); }
+}
+
+.atom-indicator.mano-pulse {
+  animation: mano-pulse 0.7s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
 /* Player turn timers (same layout for all players) */
 .timer-bar-player1,
 .timer-bar-player2,

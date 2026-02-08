@@ -3,7 +3,9 @@ Main Game Logic - Quantum Mus Game
 """
 
 import logging
-from card_deck import QuantumDeck, get_highest_card, get_lowest_card, compare_cards
+from Logica cuantica.baraja import QuantumDeck
+from Logica cuantica.dealer import QuantumDealer
+from Logica cuantica.cartas import QuantumCard
 from round_handlers import RoundHandler
 from quantum_collapse import QuantumCollapseManager
 from entanglement_system import EntanglementSystem
@@ -69,7 +71,7 @@ class QuantumMusGame:
         }
         
         # Initialize deck and hands
-        self.deck = QuantumDeck(game_mode)
+        self.deck = QuantumDeck()
         self.deck.shuffle()
         self.hands = {i: [] for i in range(4)}
         
@@ -88,74 +90,100 @@ class QuantumMusGame:
         logger.info(f"Created game {room_id} with mode {game_mode}")
     
     def deal_cards(self):
-        """Deal 4 cards to each active player"""
-        # Calculate cards needed based on actual number of players
+        """Deal 4 cards to each active player using Qiskit-based QuantumDeck"""
         cards_needed = 4 * self.num_players
-        
-        # Validate deck has enough cards
-        if len(self.deck.cards) < cards_needed:
-            logger.error(f"Insufficient cards in deck: {len(self.deck.cards)} (need {cards_needed} for {self.num_players} players)")
-            return {'success': False, 'error': 'Insufficient cards in deck'}
-        
-        # Deal cards to active players only
-        for player_idx in range(self.num_players):
-            self.hands[player_idx] = self.deck.deal(4)
-            if not self.hands[player_idx] or len(self.hands[player_idx]) != 4:
-                logger.error(f"Failed to deal 4 cards to player {player_idx}")
-                return {'success': False, 'error': f'Failed to deal cards to player {player_idx}'}
-        
-        # Clear unused player slots if less than 4 players
-        for player_idx in range(self.num_players, 4):
-            self.hands[player_idx] = []
-        
-        logger.info(f"Dealt cards to {self.num_players} players in game {self.room_id}")
-        return {'success': True}
+        try:
+            for player_idx in range(self.num_players):
+                self.hands[player_idx] = self.deck.draw(4)
+                if not self.hands[player_idx] or len(self.hands[player_idx]) != 4:
+                    logger.error(f"Failed to deal 4 cards to player {player_idx}")
+                    return {'success': False, 'error': f'Failed to deal cards to player {player_idx}'}
+            for player_idx in range(self.num_players, 4):
+                self.hands[player_idx] = []
+            logger.info(f"[QSKIT] Dealt cards quantumly to {self.num_players} players in game {self.room_id}")
+            print(f"[QSKIT] Dealt cards quantumly to {self.num_players} players in game {self.room_id}")
+            return {'success': True}
+        except Exception as e:
+            logger.error(f"Qiskit QuantumDeck error: {e}")
+            return {'success': False, 'error': str(e)}
+        def collapse_entangled_cards(self, player_index):
+            """Collapse all entangled cards in a player's hand using Qiskit logic"""
+            hand = self.hands.get(player_index, [])
+            collapsed = []
+            for card in hand:
+                # Only collapse if not already measured and is entangled
+                if hasattr(card, 'measured_state') and card.measured_state is None:
+                    # For Qiskit-based QuantumCard, collapse() will measure
+                    state = card.collapse()
+                    collapsed.append((card.card_id, state))
+            logger.info(f"[QSKIT] Collapsed entangled cards for player {player_index}: {collapsed}")
+            print(f"[QSKIT] Collapsed entangled cards for player {player_index}: {collapsed}")
+            return collapsed
     
     def deal_new_cards(self):
-        """Deal new cards to replace discarded ones"""
+        """Deal new cards to replace discarded ones, using leftover deck, then discards if needed"""
         if not self.state['waitingForDiscard']:
             logger.error(f"deal_new_cards called when not waiting for discard")
             return {'success': False, 'error': 'Not waiting for discard'}
-        
+
         # Validate all active players have discarded
         if len(self.state['cardsDiscarded']) != self.num_players:
             logger.warning(f"deal_new_cards called with only {len(self.state['cardsDiscarded'])}/{self.num_players} players ready")
-            return {'success': False, 'error': f'Not all players ready: {len(self.state["cardsDiscarded"])}/{self.num_players}'}
-        
+            return {'success': False, 'error': f'Not all players ready: {len(self.state["cardsDiscarded"])}' + f'/{self.num_players}'}
+
+        # Gather all discarded cards to allow reshuffling if needed
+        discarded_cards = []
         try:
             for player_idx, card_indices in self.state['cardsDiscarded'].items():
                 # Validate card indices
                 if not isinstance(card_indices, list) or len(card_indices) > 4:
                     logger.error(f"Invalid discard for player {player_idx}: {card_indices}")
                     return {'success': False, 'error': f'Invalid card indices for player {player_idx}'}
-                
+
                 # Remove old cards (in reverse order to maintain proper indices)
+                player_discards = []
                 for idx in sorted(card_indices, reverse=True):
                     if idx < len(self.hands[player_idx]):
-                        self.hands[player_idx].pop(idx)
+                        player_discards.append(self.hands[player_idx].pop(idx))
                     else:
                         logger.warning(f"Card index {idx} out of range for player {player_idx}")
-                
-                # Deal new cards
+                discarded_cards.extend(player_discards)
+
+            # Now deal new cards, using leftover deck, then discards if needed
+            for player_idx, card_indices in self.state['cardsDiscarded'].items():
                 num_new = len(card_indices)
-                new_cards = self.deck.deal(num_new)
+                new_cards = []
+                # First, deal from remaining deck
+                deck_remaining = len(self.deck.cards)
+                if deck_remaining >= num_new:
+                    new_cards = self.deck.deal(num_new)
+                else:
+                    # Not enough cards: deal what remains, then reshuffle discards and deal the rest
+                    if deck_remaining > 0:
+                        new_cards = self.deck.deal(deck_remaining)
+                    # Reshuffle discards into deck
+                    if discarded_cards:
+                        self.deck.cards.extend(discarded_cards)
+                        self.deck.shuffle()
+                        discarded_cards = []  # Only reshuffle once
+                        needed = num_new - len(new_cards)
+                        new_cards.extend(self.deck.deal(needed))
                 if not new_cards or len(new_cards) != num_new:
                     logger.error(f"Failed to deal {num_new} cards to player {player_idx}")
-                    return {'success': False, 'error': f'Insufficient cards in deck'}
-                
+                    return {'success': False, 'error': f'Insufficient cards in deck after reshuffling discards'}
                 self.hands[player_idx].extend(new_cards)
-            
+
             # Validate all active players still have 4 cards
             for player_idx in range(self.num_players):
                 if len(self.hands[player_idx]) != 4:
                     logger.error(f"Player {player_idx} has {len(self.hands[player_idx])} cards after deal (should be 4)")
                     return {'success': False, 'error': f'Card count mismatch for player {player_idx}'}
-            
+
             # Reset discard state
             self.state['cardsDiscarded'] = {}
             self.state['waitingForDiscard'] = False
             self.state['roundActions'] = {}  # Reset so MUS round starts fresh
-            
+
             logger.info(f"Successfully dealt new cards in game {self.room_id}")
             return {'success': True}
         except Exception as e:

@@ -764,7 +764,7 @@ function initGame() {
 
   } else {
     // Mode local (demo): Initialize local game deck
-    initializeLocalGameDeck();
+    if (isOnline && window.QuantumMusSocket && window.QuantumMusOnlineRoom) {
   }
 
   // Animación del reparto de cartas al inicio del turno
@@ -3352,19 +3352,21 @@ function initGame() {
       if (existingIndicator) {
         existingIndicator.remove();
       }
-      
+
       // Add mano indicator to current mano player
       if (i === gameState.manoIndex) {
         const avatar = zone.querySelector('.character-avatar');
         if (avatar) {
           const indicator = document.createElement('div');
-          indicator.className = 'atom-indicator';
+          indicator.className = 'atom-indicator mano-pulse';
           indicator.title = 'Mano - Comienza el juego';
           // Use stored character key (e.g. 'preskill') to get consistent color
           const characterKey = (gameState.playerCharacters && gameState.playerCharacters[i]) || null;
           const color = characterKey ? getCharacterColorValue(characterKey) : getPlayerColorValue(i);
           indicator.innerHTML = CardGenerator.generateAtomIndicator(color);
           avatar.appendChild(indicator);
+          // Remove the pulse class after animation so it only pulses on change
+          setTimeout(() => { indicator.classList.remove('mano-pulse'); }, 700);
         }
       }
     }
@@ -6143,11 +6145,16 @@ function initGame() {
   function showPenaltyNotification(playerIndex, roundName, penalty) {
     const notification = document.createElement('div');
     notification.className = 'penalty-notification';
+    const playerName = (gameState.playerActualNames && gameState.playerActualNames[playerIndex])
+      ? gameState.playerActualNames[playerIndex]
+      : (gameState.playerNames && gameState.playerNames[playerIndex])
+        ? gameState.playerNames[playerIndex]
+        : `Jugador ${playerIndex + 1}`;
     notification.innerHTML = `
       <div class="penalty-icon" style="font-size: 3rem; margin-bottom: 10px;">⚠️</div>
       <div class="penalty-text">
         <strong style="font-size: 1.5rem; color: #ff4444;">Predicción Incorrecta</strong><br>
-        <span style="font-size: 1.2rem; margin: 10px 0; display: block;">Jugador ${playerIndex + 1} - ${roundName}</span><br>
+        <span style="font-size: 1.2rem; margin: 10px 0; display: block;">${playerName} - ${roundName}</span><br>
         <span style="color: #ff4444; font-size: 2rem; font-weight: bold;">-${penalty} Punto${penalty > 1 ? 's' : ''}</span>
       </div>
     `;
