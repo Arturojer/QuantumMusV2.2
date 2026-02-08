@@ -1,7 +1,7 @@
 import numpy as np
 from typing import List, Tuple, Dict
 from qiskit_aer import AerSimulator
-from .card_qiskit import QuantumCard
+from .cartas import QuantumCard
 
 class QuantumDeck:
     """

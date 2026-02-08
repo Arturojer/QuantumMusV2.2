@@ -3,10 +3,10 @@
 import numpy as np
 from typing import List, Tuple, Dict, FrozenSet
 
-from src.quantum.tunnel_effect import next_dealer_with_tunnel
-from src.quantum.deck_qiskit import QuantumDeck
-from src.quantum.card_qiskit import QuantumCard
-from .player_qiskit import QuantumPlayer
+from .efecto_tunel import TunnelEffect
+from .baraja import QuantumDeck
+from .cartas import QuantumCard
+from .jugador import QuantumPlayer
 
 
 class QuantumDealer:
@@ -128,11 +128,10 @@ class QuantumDealer:
             player.clear_hand()
 
         # ✅ EFECTO TÚNEL: decidir siguiente mano/dealer
-        self.current_dealer_idx = next_dealer_with_tunnel(
+        tunnel = TunnelEffect(p_classic=self.p_tunnel_classic)
+        self.current_dealer_idx = tunnel.next_dealer_idx(
             self.current_dealer_idx,
-            len(self.players),
-            p_classic=self.p_tunnel_classic,
-            rng=self._tunnel_rng,
+            len(self.players)
         )
 
         self.round_number += 1

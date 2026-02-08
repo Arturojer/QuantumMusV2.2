@@ -1,5 +1,5 @@
 from typing import List
-from src.quantum.card_qiskit import QuantumCard
+from .cartas import QuantumCard
 
 class QuantumPlayer:
     """

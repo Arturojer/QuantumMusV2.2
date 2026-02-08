@@ -26,3 +26,5 @@ eventlet==0.33.3
 
 # Quantum Mus - Quantum logic dependencies
 numpy
+qiskit
+qiskit-aer
