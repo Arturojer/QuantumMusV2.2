@@ -486,6 +486,24 @@ function initGame() {
   function handleBettingRound(playerIndex, action, betAmount = 0) {
     console.log(`Player ${playerIndex + 1} in betting round ${gameState.currentRound}: ${action}, bet amount: ${betAmount}`);
     console.log('[handleBettingRound] Running in local mode');
+
+    // If running in online mode, forward the action to the server and
+    // skip the local handling so server becomes authoritative.
+    try {
+      if (window.isOnline && window.QuantumMusSocket && window.QuantumMusOnlineRoom) {
+        const payload = {
+          room_id: window.QuantumMusOnlineRoom,
+          player_index: playerIndex,
+          action: action,
+          data: { amount: betAmount, round: gameState.currentRound }
+        };
+        console.log('[SOCKET] Emitting player_action', payload);
+        window.QuantumMusSocket.emit('player_action', payload);
+        return; // stop local processing - server will broadcast updated state
+      }
+    } catch (e) {
+      console.error('Failed to emit player_action to server:', e);
+    }
     
     console.log('Current bet state:', gameState.currentBet);
     

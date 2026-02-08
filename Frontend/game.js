@@ -558,7 +558,7 @@ function initGame() {
       const st = gs.state || gs;
       if (st) {
         gameState.currentRound = st.currentRound || gameState.currentRound;
-        gameState.activePlayerIndex = ((st.activePlayerIndex ?? 0) - localIdx + 4) % 4;
+        gameState.activePlayerIndex = ((st.activePlayerIndex ?? 0) - localPlayerIndex + 4) % 4;
         if (st.teams) {
           gameState.teams.team1.score = st.teams.team1?.score ?? 0;
           gameState.teams.team2.score = st.teams.team2?.score ?? 0;
@@ -568,6 +568,21 @@ function initGame() {
         updateScoreboard();
         startPlayerTurnTimer(gameState.activePlayerIndex);
       }
+    });
+
+    // Server broadcasts updates specific to the GRANDE betting phase
+    socket.on('grande_phase_update', (data) => {
+      console.log('[SOCKET] grande_phase_update', data);
+      const gp = data.grande_phase || data;
+      if (!gp) return;
+      gameState.currentBet = gp.currentBet || gameState.currentBet;
+      gameState.currentRound = gp.currentRound || gameState.currentRound;
+      if (typeof gp.activePlayerIndex === 'number') {
+        gameState.activePlayerIndex = ((gp.activePlayerIndex ?? 0) - localPlayerIndex + 4) % 4;
+      }
+      updateRoundDisplay();
+      updateScoreboard();
+      startPlayerTurnTimer(gameState.activePlayerIndex);
     });
     socket.on('game_ended', (data) => {
       if (data.winner && typeof window.showGameOver === 'function') {
