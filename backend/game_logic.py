@@ -91,6 +91,9 @@ class QuantumMusGame:
     
     def deal_cards(self):
         """Deal 4 cards to each active player using Qiskit-based QuantumDeck"""
+        # Always reset deck to 40 cards at the start of a new hand/game
+        self.deck = QuantumDeck()
+        self.deck.shuffle()
         cards_needed = 4 * self.num_players
         try:
             for player_idx in range(self.num_players):

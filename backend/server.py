@@ -57,7 +57,9 @@ CORS_ORIGINS = _get_cors_origins()
 from game_manager import GameManager
 from room_manager import RoomManager
 from models import db, Game, Player, GameHistory
+from Logica_cuantica.baraja import QuantumDeck
 
+# Configure
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -97,6 +99,17 @@ with app.app_context():
     db.create_all()
     logger.info("Database initialized")
 
+# Valid characters for the game
+VALID_CHARACTERS = {
+    'preskill': 'John Preskill',
+    'zoller': 'Peter Zoller',
+    'cirac': 'Ignacio Cirac',
+    'deutsch': 'David Deutsch',
+    'simmons': 'Matthew Simmons',
+    'broadbent': 'Anne Broadbent',
+    'martinis': 'Nicole Yunger Halpern',
+    'monroe': 'Karen Hallberg'
+}
 
 # ==================== HTTP ENDPOINTS ====================
 
@@ -231,7 +244,15 @@ def handle_join_room(data):
     """Join a game room"""
     room_id = data.get('room_id')
     player_name = data.get('player_name', 'Anonymous')
-    character = data.get('character')  # Puede ser None al unirse, se elige después
+    character = data.get('character')  # Can be None initially, chosen later
+    
+    # Validate character if provided
+    if character and character not in VALID_CHARACTERS:
+        emit('joined_room', {
+            'success': False,
+            'error': f'Invalid character: {character}. Valid characters: {list(VALID_CHARACTERS.keys())}'
+        })
+        return
     
     result = room_manager.add_player(room_id, request.sid, player_name, character)
     
@@ -258,16 +279,74 @@ def handle_join_room(data):
 
 @socketio.on('set_character')
 def handle_set_character(data):
-    """Actualizar el personaje de un jugador ya en la sala"""
+    """Update player's character in the room"""
     room_id = data.get('room_id')
     character = data.get('character')
+    
+    # Allow None (unselecting), but validate if character is provided
+    if character is not None and character not in VALID_CHARACTERS:
+        emit('game_error', {
+            'error': f'Invalid character: {character}. Valid characters: {list(VALID_CHARACTERS.keys())}'
+        })
+        return
+    
+    # Check if another player already has this character (prevent duplicates)
+    if character is not None:
+        room = room_manager.get_room(room_id)
+        if room:
+            for player in room['players']:
+                if player['socket_id'] != request.sid and player['character'] == character:
+                    emit('game_error', {
+                        'error': f'Character {character} is already selected by another player'
+                    })
+                    return
     
     if room_manager.set_player_character(room_id, request.sid, character):
         socketio.emit('room_updated', {
             'room': room_manager.get_room(room_id)
         }, room=room_id)
     else:
-        emit('game_error', {'error': 'No se pudo actualizar el personaje'})
+        emit('game_error', {'error': 'Failed to update character'})
+
+@socketio.on('join_room_by_code')
+def handle_join_room_by_code(data):
+    """Join a room using room code"""
+    room_code = data.get('room_code', '').upper()
+    player_name = data.get('player_name', 'Anonymous')
+    
+    # Look up room by code
+    room = room_manager.get_room_by_code(room_code)
+    
+    if not room:
+        emit('joined_room', {
+            'success': False,
+            'error': f'Room with code {room_code} not found'
+        })
+        return
+    
+    # Join the room using its ID
+    result = room_manager.add_player(room['id'], request.sid, player_name, None)
+    
+    if result['success']:
+        join_room(room['id'])
+        
+        # Notify player
+        emit('joined_room', {
+            'success': True,
+            'room_id': room['id'],
+            'player_index': result['player_index'],
+            'room': room_manager.get_room(room['id'])
+        })
+        
+        # Notify all players in room
+        socketio.emit('room_updated', {
+            'room': room_manager.get_room(room['id'])
+        }, room=room['id'])
+    else:
+        emit('joined_room', {
+            'success': False,
+            'error': result.get('error', 'Failed to join room')
+        })
 
 @socketio.on('leave_room')
 def handle_leave_room(data):
@@ -593,24 +672,6 @@ def handle_trigger_declaration_collapse(data):
         }, room=room_id)
         
         logger.info(f"Collapse broadcast in room {room_id}: Player {player_index} made declaration '{declaration}' in {round_name}")
-    else:
-        socketio.emit('game_error', {'error': collapse_result.get('error', 'Failed to collapse cards')}, room=room_id)
-        logger.error(f"Collapse failed in room {room_id}: {collapse_result.get('error')}")
-
-@socketio.on('trigger_bet_acceptance_collapse')
-def handle_trigger_bet_acceptance_collapse(data):
-    """Handle card collapse when player accepts/makes a bet"""
-    room_id = data.get('room_id')
-    player_index = data.get('player_index')
-    round_name = data.get('round_name')
-    
-    game = game_manager.get_game(room_id)
-    if not game:
-        emit('game_error', {'error': 'Game not found'})
-        return
-    
-    # Trigger collapse
-    collapse_result = game.trigger_collapse_on_bet_acceptance(player_index, round_name)
     
     if collapse_result['success']:
         # Broadcast collapse event to ALL players
