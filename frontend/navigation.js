@@ -48,7 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
       socket.on('room_created', (data) => {
         if (data.success && data.room) {
           gameState.roomId = data.room.id;
-          gameState.roomCode = data.room.id;
+          gameState.roomCode = data.room.code || data.room.id;
           document.getElementById('room-code-value').textContent = gameState.roomCode;
           socket.emit('join_room', {
             room_id: data.room.id,
@@ -135,10 +135,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function emitJoinRoom() {
     if (!gameState.socket || !gameState.socket.connected) return;
-    const code = (gameState.roomCode || '').trim().toLowerCase();
-    if (!code) return;
+    const raw = (gameState.roomCode || '').trim();
+    if (!raw) return;
+    const isShortCode = raw.length === 4;
+    if (isShortCode) {
+      gameState.socket.emit('join_room_by_code', {
+        room_code: raw.toUpperCase(),
+        player_name: gameState.playerName,
+        character: gameState.selectedCharacter ? gameState.selectedCharacter.id : null
+      });
+      return;
+    }
     gameState.socket.emit('join_room', {
-      room_id: code,
+      room_id: raw.toLowerCase(),
       player_name: gameState.playerName,
       character: gameState.selectedCharacter ? gameState.selectedCharacter.id : null
     });
