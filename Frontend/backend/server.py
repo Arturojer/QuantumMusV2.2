@@ -14,6 +14,18 @@ from game_manager import GameManager
 from room_manager import RoomManager
 from models import db, Game, Player, GameHistory
 
+# Valid characters - all 8 scientists
+VALID_CHARACTERS = {
+    'preskill': 'Preskill',
+    'zoller': 'Zoller',
+    'cirac': 'Cirac',
+    'deutsch': 'Deutsch',
+    'simmons': 'Simmons',
+    'broadbent': 'Broadbent',
+    'martinis': 'Nicole Yunger Halpern',
+    'monroe': 'Karen Hallberg'
+}
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -125,7 +137,15 @@ def handle_join_room(data):
     """Join a game room"""
     room_id = data.get('room_id')
     player_name = data.get('player_name', 'Anonymous')
-    character = data.get('character', 'preskill')
+    character = data.get('character')  # Can be None initially, chosen later
+    
+    # Validate character if provided
+    if character and character not in VALID_CHARACTERS:
+        emit('joined_room', {
+            'success': False,
+            'error': f'Invalid character: {character}. Valid characters: {list(VALID_CHARACTERS.keys())}'
+        })
+        return
     
     result = room_manager.add_player(room_id, request.sid, player_name, character)
     
@@ -144,6 +164,77 @@ def handle_join_room(data):
         socketio.emit('room_updated', {
             'room': room_manager.get_room(room_id)
         }, room=room_id)
+    else:
+        emit('joined_room', {
+            'success': False,
+            'error': result.get('error', 'Failed to join room')
+        })
+
+@socketio.on('set_character')
+def handle_set_character(data):
+    """Update player's character in the room"""
+    room_id = data.get('room_id')
+    character = data.get('character')
+    
+    # Allow None (unselecting), but validate if character is provided
+    if character is not None and character not in VALID_CHARACTERS:
+        emit('game_error', {
+            'error': f'Invalid character: {character}. Valid characters: {list(VALID_CHARACTERS.keys())}'
+        })
+        return
+    
+    # Check if another player already has this character (prevent duplicates)
+    if character is not None:
+        room = room_manager.get_room(room_id)
+        if room:
+            for player in room['players']:
+                if player['socket_id'] != request.sid and player['character'] == character:
+                    emit('game_error', {
+                        'error': f'Character {character} is already selected by another player'
+                    })
+                    return
+    
+    if room_manager.set_player_character(room_id, request.sid, character):
+        socketio.emit('room_updated', {
+            'room': room_manager.get_room(room_id)
+        }, room=room_id)
+    else:
+        emit('game_error', {'error': 'Failed to update character'})
+
+@socketio.on('join_room_by_code')
+def handle_join_room_by_code(data):
+    """Join a room using room code"""
+    room_code = data.get('room_code', '').upper()
+    player_name = data.get('player_name', 'Anonymous')
+    
+    # Look up room by code
+    room = room_manager.get_room_by_code(room_code)
+    
+    if not room:
+        emit('joined_room', {
+            'success': False,
+            'error': f'Room with code {room_code} not found'
+        })
+        return
+    
+    # Join the room using its ID
+    result = room_manager.add_player(room['id'], request.sid, player_name, None)
+    
+    if result['success']:
+        join_room(room['id'])
+        
+        # Notify player
+        emit('joined_room', {
+            'success': True,
+            'room_id': room['id'],
+            'player_index': result['player_index'],
+            'room': room_manager.get_room(room['id'])
+        })
+        
+        # Notify all players in room
+        socketio.emit('room_updated', {
+            'room': room_manager.get_room(room['id'])
+        }, room=room['id'])
     else:
         emit('joined_room', {
             'success': False,

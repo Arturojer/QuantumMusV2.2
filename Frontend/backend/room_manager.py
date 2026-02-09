@@ -4,6 +4,8 @@ Room Manager - Handles game rooms and lobbies
 
 import uuid
 import logging
+import random
+import string
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -15,13 +17,23 @@ class RoomManager:
     def __init__(self):
         self.rooms = {}  # room_id -> room_data
         self.player_rooms = {}  # socket_id -> room_id
+        self.room_codes = {}  # room_code -> room_id (for easy lookup)
+    
+    def _generate_room_code(self):
+        """Generate a unique 4-character room code"""
+        while True:
+            code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+            if code not in self.room_codes:
+                return code
     
     def create_room(self, name, game_mode='4', max_players=4):
         """Create a new game room"""
         room_id = str(uuid.uuid4())[:8]
+        room_code = self._generate_room_code()
         
         room = {
             'id': room_id,
+            'code': room_code,
             'name': name,
             'game_mode': game_mode,
             'max_players': max_players,
@@ -31,13 +43,21 @@ class RoomManager:
         }
         
         self.rooms[room_id] = room
-        logger.info(f"Created room {room_id}: {name}")
+        self.room_codes[room_code] = room_id
+        logger.info(f"Created room {room_id} with code {room_code}: {name}")
         
         return room
     
     def get_room(self, room_id):
         """Get room by ID"""
         return self.rooms.get(room_id)
+    
+    def get_room_by_code(self, room_code):
+        """Get room by code"""
+        room_id = self.room_codes.get(room_code)
+        if room_id:
+            return self.rooms.get(room_id)
+        return None
     
     def get_available_rooms(self):
         """Get list of rooms that can be joined"""

@@ -2084,7 +2084,12 @@ function initGame() {
     };
     
     avatar.innerHTML = `
-      <div class="character-portrait">
+      <div class="character-portrait" style="position: relative;">
+        <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; z-index: 10;">
+          <div style="font-size: 2.5rem; font-weight: bold; color: var(--quantum-${getCharacterColor(player.character)}); background: rgba(0,0,0,0.4); border-radius: 8px; width: 80%; height: 80%; display: flex; align-items: center; justify-content: center;">
+            ${player.name.charAt(0).toUpperCase()}
+          </div>
+        </div>
         ${CardGenerator.generateCharacter(player.name)}
       </div>
       <div class="character-name" style="color: var(--quantum-${getCharacterColor(player.character)})">

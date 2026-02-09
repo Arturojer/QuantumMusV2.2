@@ -699,6 +699,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
 }
 
 .character-info {
@@ -1184,6 +1185,10 @@
   --quantum-lavender: #a78bfa;
   --quantum-gold: #f5c518;
   --quantum-indigo: #4338ca;
+  --quantum-magenta: #ff66c4;
+  --quantum-green: #2ecc71;
+  --quantum-orange: #ffb347;
+  --quantum-cadet: #5f9ea0;
   --paper-cream: #fffef9;
   --paper-beige: #f8f4e8;
   --card-shadow: #2d1810;
@@ -1435,6 +1440,26 @@ body::after {
 .character-avatar.deutsch {
   border-color: var(--quantum-gold);
   box-shadow: 0 10px 30px rgba(245, 197, 24, 0.3);
+}
+
+.character-avatar.simmons {
+  border-color: var(--quantum-magenta);
+  box-shadow: 0 10px 30px rgba(255, 102, 196, 0.3);
+}
+
+.character-avatar.broadbent {
+  border-color: var(--quantum-green);
+  box-shadow: 0 10px 30px rgba(46, 204, 113, 0.3);
+}
+
+.character-avatar.martinis {
+  border-color: var(--quantum-orange);
+  box-shadow: 0 10px 30px rgba(255, 179, 71, 0.3);
+}
+
+.character-avatar.monroe {
+  border-color: var(--quantum-cadet);
+  box-shadow: 0 10px 30px rgba(95, 158, 160, 0.3);
 }
 
 .character-portrait {

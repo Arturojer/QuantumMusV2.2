@@ -15,7 +15,7 @@ const gameState = {
   currentRound: 'MUS', // MUS, GRANDE, CHICA, PARES, JUEGO
   manoIndex: 0, // Player who starts (mano)
   activePlayerIndex: 0, // Current player making decision
-  playerNames: ['Preskill', 'Cirac', 'Zoller', 'Deutsch'], // Player character names
+  playerNames: ['Preskill', 'Cirac', 'Zoller', 'Deutsch', 'Simmons', 'Broadbent', 'Yunger Halpern', 'Hallberg'], // Player character names
   handsPlayed: 0, // Counter for hands played in the game
   teams: {
     team1: { players: [0, 2], score: 0, name: 'Copenhague' }, // Preskill + Zoller
@@ -48,8 +48,54 @@ const gameState = {
     },
     playerEntanglements: {} // Map of player index to their entangled cards info
   }
+  ,
+  // Guard to ensure per-player timeout actions are only executed once
+  playerTimeoutConsumed: [false, false, false, false]
 
 };
+
+// Reactive setter for currentRound: ensure demo tunneling runs on every round start
+(function() {
+  let _currentRound = gameState.currentRound;
+  Object.defineProperty(gameState, 'currentRound', {
+    get() { return _currentRound; },
+    set(val) {
+      _currentRound = val;
+      // update musPhaseActive flag
+      gameState.musPhaseActive = (_currentRound === 'MUS');
+      // Only apply frontend/demo tunneling when NOT online.
+      try {
+        if (!window.onlineMode) {
+          // Apply tunneling only for betting rounds (GRANDE/CHICA).
+          // PARES/JUEGO declarations must invoke tunneling exactly once
+          // inside their declaration handlers to avoid loops.
+          if (['GRANDE','CHICA'].includes(_currentRound)) {
+            try {
+              const classicStart = gameState.manoIndex ?? 0;
+              const finalStart = chooseRoundStarter(classicStart);
+              gameState.activePlayerIndex = finalStart;
+              updateManoIndicators && updateManoIndicators();
+              updateRoundDisplay && updateRoundDisplay();
+              updateScoreboard && updateScoreboard();
+              updateButtonStates && updateButtonStates(gameState.activePlayerIndex === 0);
+              startPlayerTurnTimer && startPlayerTurnTimer(gameState.activePlayerIndex);
+            } catch (e) {
+              console.warn('[gameState.currentRound.setter] tunneling apply failed', e);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[gameState.currentRound.setter] error', e);
+      }
+    }
+  });
+})();
+
+// Demo tunneling controls (frontend-only)
+// By default do NOT force tunneling in local/demo mode — use probabilistic sampling
+gameState.forceTunnelNextRound = false; // if true, next round start will tunnel 100%
+gameState.forceTunnelNextHand = false;  // if true, next hand rotation will tunnel 100%
+gameState.tunnelPClassic = 0.99;        // probability to keep classic starter
 
 function showPuntoModal(callback = null) {
     const modal = createModal('#f97316');
@@ -275,8 +321,11 @@ function getPlayerEntangledCards(playerIndex) {
 
 // Check if a card is entangled
 function isCardEntangled(playerIndex, cardIndex) {
+  // Only glow if the partner is the local player's teammate
   const entangled = getPlayerEntangledCards(playerIndex);
-  return entangled.some(e => e.card_index === cardIndex);
+  const localPlayerIndex = gameState.playerIndex;
+  const teammateIndex = getTeammate(localPlayerIndex);
+  return entangled.some(e => e.card_index === cardIndex && e.partner_player === teammateIndex);
 }
 
 // Get partner player for an entangled card
@@ -284,6 +333,44 @@ function getEntangledPartnerPlayer(playerIndex, cardIndex) {
   const entangled = getPlayerEntangledCards(playerIndex);
   const pair = entangled.find(e => e.card_index === cardIndex);
   return pair ? pair.partner_player : null;
+}
+
+// Debug helper: log structured hands and which cards should glow
+function logHandsAndGlow() {
+  try {
+    const players = [];
+    for (let p = 0; p < 4; p++) {
+      const zone = document.querySelector(`#player${p+1}-zone`);
+      const cardEls = zone ? Array.from(zone.querySelectorAll('.quantum-card')) : [];
+      const cards = cardEls.map(el => {
+        // Prefer explicit cardIndex written to dataset; fallback to dealOrder modulo 4
+        const cardIndex = (typeof el.dataset.cardIndex !== 'undefined')
+          ? parseInt(el.dataset.cardIndex, 10)
+          : (Number.isFinite(parseInt(el.dataset.dealOrder || '', 10)) ? (parseInt(el.dataset.dealOrder, 10) % 4) : -1);
+        const value = el.dataset.mainValue || el.dataset.value || null;
+        const suit = el.dataset.suit || null;
+        const entangledFlag = el.dataset.entangled === 'true';
+        const collapsedFlag = el.dataset.collapsed === 'true';
+        const shouldGlow = isCardEntangled(p, cardIndex);
+        const partnerPlayer = getEntangledPartnerPlayer(p, cardIndex);
+        return {
+          index: cardIndex,
+          value: value,
+          suit: suit,
+          entangled: entangledFlag,
+          collapsed: collapsedFlag,
+          shouldGlow: !!shouldGlow,
+          partnerPlayer: partnerPlayer
+        };
+      });
+      players.push({ playerIndex: p, cards });
+    }
+
+    // Output compact JSON for easy copy/paste
+    console.log('[DEBUG HANDS] handsAndGlow:', JSON.stringify({ timestamp: Date.now(), players }, null, 2));
+  } catch (err) {
+    console.error('[DEBUG HANDS] Failed to log hands', err);
+  }
 }
 
 // Update entanglement state from server
@@ -303,9 +390,25 @@ function updateEntanglementState(entanglementData) {
 // Helper to build player entanglement map from pairs
 function getPlayerEntangledCardsFromPairs(playerIndex) {
   const entangled = [];
-  
-  // This will be populated from the hand data when cards are dealt/updated
-  // We'll need to cross-reference with the actual cards in the player's hand
+  // Each pair in gameState.entanglement.pairs should be of the form:
+  // { cardA: { player: idxA, card_index: cardIdxA }, cardB: { player: idxB, card_index: cardIdxB } }
+  if (!gameState.entanglement.pairs) return entangled;
+  gameState.entanglement.pairs.forEach(pair => {
+    // Check if this player is involved in the pair
+    if (pair.cardA.player === playerIndex) {
+      entangled.push({
+        card_index: pair.cardA.card_index,
+        partner_player: pair.cardB.player,
+        partner_card_index: pair.cardB.card_index
+      });
+    } else if (pair.cardB.player === playerIndex) {
+      entangled.push({
+        card_index: pair.cardB.card_index,
+        partner_player: pair.cardA.player,
+        partner_card_index: pair.cardA.card_index
+      });
+    }
+  });
   return entangled;
 }
 
@@ -368,33 +471,38 @@ function initGame() {
   console.log('Lobby Players:', lobbyPlayers);
   console.log('Local Player Index:', localPlayerIndex);
   
-  const characterNames = { preskill: 'Preskill', cirac: 'Cirac', zoller: 'Zoller', deutsch: 'Deutsch' };
+  const characterNames = { preskill: 'Preskill', cirac: 'Cirac', simmons: 'Simmons', broadbent: 'Broadbent', deutsch: 'Deutsch' };
+
   
-  // Build raw players from lobby
-  const rawPlayers = [
-    { id: 'player1', name: 'Preskill', character: 'preskill', playerName: '', score: 0 },
-    { id: 'player2', name: 'Cirac', character: 'cirac', playerName: '', score: 0 },
-    { id: 'player3', name: 'Zoller', character: 'zoller', playerName: '', score: 0 },
-    { id: 'player4', name: 'Deutsch', character: 'deutsch', playerName: '', score: 0 }
+  // Build players array so that local player is always player1 (bottom),
+  // and all other players follow in the same order as in the lobby, matching their character and color.
+  const characterList = [
+    { id: 'preskill', name: 'Preskill' },
+    { id: 'zoller', name: 'Zoller' },
+    { id: 'cirac', name: 'Cirac' },
+    { id: 'deutsch', name: 'Deutsch' },
+    { id: 'simmons', name: 'Simmons' },
+    { id: 'broadbent', name: 'Broadbent' },
+    { id: 'martinis', name: 'Yunger Halpern' },
+    { id: 'monroe', name: 'Hallberg' }
   ];
-  
-  lobbyPlayers.forEach((lp, idx) => {
-    if (rawPlayers[idx]) {
-      rawPlayers[idx].name = characterNames[lp.character] || rawPlayers[idx].name;
-      rawPlayers[idx].character = lp.character || rawPlayers[idx].character;
-      rawPlayers[idx].playerName = lp.name || '';
-    }
-  });
-  
-  // Reorder so local player is always at bottom (player1): [local, opponent, teammate, opponent]
-  // Teams: (0,2) vs (1,3) - so index 2 is teammate
+  const N = lobbyPlayers.length;
   const L = localPlayerIndex;
-  const players = [
-    rawPlayers[L],
-    rawPlayers[(L + 1) % 4],
-    rawPlayers[(L + 2) % 4],
-    rawPlayers[(L + 3) % 4]
-  ].map((p, i) => ({ ...p, id: `player${i + 1}` }));
+  const players = [];
+  for (let i = 0; i < N; i++) {
+    const lobbyIdx = (L + i) % N;
+    const lp = lobbyPlayers[lobbyIdx];
+    const charObj = characterList.find(c => c.id === lp.character);
+    if (!charObj) continue;
+    players.push({
+      id: `player${i + 1}`,
+      name: charObj.name,
+      character: lp.character,
+      playerName: lp.name || charObj.name,
+      color: getCharacterColorValue(lp.character),
+      score: 0
+    });
+  }
   
   // Store player actual names for action notifications
   gameState.playerActualNames = players.map(p => p.playerName || p.name);
@@ -414,7 +522,7 @@ function initGame() {
       gameState.teams.team1.score = st.teams.team1?.score ?? 0;
       gameState.teams.team2.score = st.teams.team2?.score ?? 0;
     }
-    gameState.currentBet = st.currentBet || { amount: 0, bettingTeam: null, betType: null, responses: {} };
+      const validCharacterIds = characterList.map(c => c.id);
     gameState.waitingForDiscard = st.waitingForDiscard || false;
     window.QuantumMusOnlineRoom = window.roomId;
     window.QuantumMusLocalIndex = localIdx;
@@ -502,6 +610,14 @@ function initGame() {
       handContainer.innerHTML = '';
       const suitMap = { oros: ['theta', 'θ', '#f5c518'], copas: ['phi', 'φ', '#ff6b6b'], espadas: ['delta', 'δ', '#a78bfa'], bastos: ['psi', 'ψ', '#2ec4b6'] };
       let hand = (data.game_state && data.game_state.my_hand) || (data.game_state && data.game_state.hands && data.game_state.hands[localIdx]) || [];
+      // If server provides mano, use it (convert from server index to local perspective)
+      const gs = data.game_state || data.game_state.state || {};
+      if (gs && typeof gs.manoIndex !== 'undefined') {
+        // server manoIndex is absolute; convert to local 0-based (player1) perspective
+        gameState.manoIndex = ((gs.manoIndex ?? 0) - localIdx + 4) % 4;
+        console.log('[ONLINE] Received manoIndex from server:', gs.manoIndex, '-> local manoIndex:', gameState.manoIndex);
+        updateManoIndicators();
+      }
       if (!hand.length) {
         console.warn('[ONLINE] No hand found for local player, using fallback empty hand');
       }
@@ -516,15 +632,64 @@ function initGame() {
       const st = gs.state || gs;
       if (st) {
         gameState.currentRound = st.currentRound || gameState.currentRound;
+        if (typeof st.manoIndex !== 'undefined') {
+          gameState.manoIndex = ((st.manoIndex ?? 0) - localIdx + 4) % 4;
+          updateManoIndicators();
+        }
         gameState.activePlayerIndex = ((st.activePlayerIndex ?? 0) - localIdx + 4) % 4;
         if (st.teams) {
           gameState.teams.team1.score = st.teams.team1?.score ?? 0;
           gameState.teams.team2.score = st.teams.team2?.score ?? 0;
         }
         gameState.currentBet = st.currentBet || gameState.currentBet;
+        // If server included declaration-phase metadata, apply it
+        try {
+          const declRes = data.declaration_result;
+          if (declRes && declRes.declarations) {
+            // Server declarations are keyed by server-side player indices.
+            // Convert them to local indices before storing in client state.
+            const localOffset = window.QuantumMusLocalIndex || 0;
+            const remapped = {};
+            Object.keys(declRes.declarations).forEach(k => {
+              const serverIdx = parseInt(k, 10);
+              const localIdx = ((serverIdx - localOffset + 4) % 4);
+              remapped[localIdx] = declRes.declarations[k];
+            });
+            if (declRes.round_name === 'PARES') {
+              gameState.paresDeclarations = remapped;
+            } else if (declRes.round_name === 'JUEGO') {
+              gameState.juegoDeclarations = remapped;
+            }
+          }
+        } catch (e) {
+          console.debug('No declaration_result in game_update');
+        }
         updateRoundDisplay();
         updateScoreboard();
         startPlayerTurnTimer(gameState.activePlayerIndex);
+      }
+    });
+    // Server informs all clients when a tunneling moved the mano
+    socket.on('tunnel_notification', (tunnel) => {
+      try {
+        // tunnel: { from, to, to_name, tunneled }
+        const toAbs = (typeof tunnel.to !== 'undefined') ? tunnel.to : null;
+        if (toAbs !== null) {
+          const localTo = ((toAbs ?? 0) - localIdx + 4) % 4;
+          gameState.manoIndex = localTo;
+          gameState.activePlayerIndex = localTo; // Make tunneled starter active
+          updateManoIndicators();
+          updateRoundDisplay();
+          updateScoreboard();
+          // Ensure buttons enabled if it's local player's turn
+          updateButtonStates(gameState.activePlayerIndex === 0);
+          // Start timer for new active player (if local) or show timers appropriately
+          startPlayerTurnTimer(gameState.activePlayerIndex);
+        }
+        // Use manoIndex so the alert can color the name correctly
+        if (typeof showCentralTunnelAlert === 'function') showCentralTunnelAlert(gameState.manoIndex);
+      } catch (e) {
+        console.warn('[socket:tunnel_notification] handler failed', e);
       }
     });
     socket.on('game_ended', (data) => {
@@ -537,6 +702,19 @@ function initGame() {
   } else {
     // Mode local (demo): Initialize local game deck
     initializeLocalGameDeck();
+    // Choose initial mano randomly for demo using secure RNG
+    try {
+      const arr = new Uint32Array(1);
+      window.crypto.getRandomValues(arr);
+      gameState.manoIndex = arr[0] % 4;
+      console.log('[DEMO] Selected random initial manoIndex (demo):', gameState.manoIndex);
+      updateManoIndicators();
+    } catch (e) {
+      // Fallback to Math.random
+      gameState.manoIndex = Math.floor(Math.random() * 4);
+      console.warn('[DEMO] crypto.getRandomValues unavailable, using Math.random for manoIndex:', gameState.manoIndex);
+      updateManoIndicators();
+    }
   }
 
   // Animación del reparto de cartas al inicio del turno
@@ -840,6 +1018,13 @@ function initGame() {
       clearTimeout(aiDecisionTimeout);
       aiDecisionTimeout = null;
     }
+
+    // If a bet originated in MUS and we just entered the betting flow,
+    // clear the pending flag now that we're processing a betting action.
+    if (gameState._musBetPending) {
+      console.log('[handleBettingRound] Clearing _musBetPending (processing betting response)');
+      gameState._musBetPending = false;
+    }
     // Clear any per-AI autodiscard fallback for this player
     try {
       if (gameState.autoDiscardTimeouts && gameState.autoDiscardTimeouts[playerIndex]) {
@@ -896,6 +1081,10 @@ function initGame() {
       gameState.currentBet.betType = action;
       gameState.currentBet.bettingTeam = getPlayerTeam(playerIndex);
       gameState.musCutterIndex = playerIndex; // Store who cut MUS
+      // Mark that a bet originated in MUS so the initial defender selection
+      // in GRANDE preserves classical order (no tunneling). This flag will
+      // be cleared when the betting response is processed.
+      gameState._musBetPending = true;
       
       // ORDAGO cards only collapse when ACCEPTED, not when declared
       console.log(`Betting started by ${gameState.playerActualNames?.[playerIndex] || `Player ${playerIndex+1}`} (team ${gameState.currentBet.bettingTeam}), amount: ${gameState.currentBet.amount}`);
@@ -906,6 +1095,195 @@ function initGame() {
     }
   }
   
+  // Choose the starter for a round, applying demo tunneling if enabled.
+  function chooseRoundStarter(classicStarter) {
+    try {
+      // If we're online, the server is authoritative for tunneling decisions.
+      if (window.onlineMode) return classicStarter;
+      // If configured, ask the local server for a quantum decision even when
+      // the client UI is running standalone. This allows a local backend
+      // process to provide true quantum samples; falls back to crypto.
+      if (gameState.requestServerQuantum && (window.QuantumMusSocket || window.fetch)) {
+        try {
+          // Prefer Socket.IO request if available
+          if (window.QuantumMusSocket && window.QuantumMusSocket.connected) {
+            const payload = { classic_start: classicStarter, p_classic: gameState.tunnelPClassic };
+            // Return immediately; the server will emit 'tunnel_decision' which
+            // the client already listens for via socket.on('tunnel_notification')
+            window.QuantumMusSocket.emit('request_tunnel_decision', payload);
+            return classicStarter; // finalStarter will be updated once server replies
+          }
+          // Otherwise try HTTP POST to local backend
+          if (window.fetch) {
+            fetch('/api/tunnel_decision', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ classic_start: classicStarter, p_classic: gameState.tunnelPClassic })
+            }).then(r => r.json()).then(data => {
+              if (data && typeof data.to !== 'undefined') {
+                const finalStarter = data.to;
+                gameState.manoIndex = finalStarter;
+                if (typeof updateManoIndicators === 'function') updateManoIndicators();
+                const playerName = (gameState.playerActualNames && gameState.playerActualNames[finalStarter]) || gameState.playerNames[finalStarter] || `Player ${finalStarter + 1}`;
+                if (typeof showCentralTunnelAlert === 'function') showCentralTunnelAlert(finalStarter);
+              }
+            }).catch(() => {});
+            return classicStarter;
+          }
+        } catch (e) {
+          // fall through to local crypto sampling
+        }
+      }
+      const numPlayers = 4;
+      let finalStarter = classicStarter;
+      if (gameState.forceTunnelNextRound) {
+        const candidates = [...Array(numPlayers).keys()].filter(i => i !== classicStarter);
+        // Do not clear the demo force flag here so it can remain persistent
+        // across consecutive rounds when enabled by the tester.
+        // Use secure crypto randomness where available to emulate quantum sampling.
+        try {
+          if (window.crypto && window.crypto.getRandomValues) {
+            const arr = new Uint32Array(1);
+            window.crypto.getRandomValues(arr);
+            finalStarter = candidates[arr[0] % candidates.length];
+          } else {
+            finalStarter = candidates[Math.floor(Math.random() * candidates.length)];
+          }
+        } catch (e) {
+          finalStarter = candidates[Math.floor(Math.random() * candidates.length)];
+        }
+      } else {
+        const pClassic = gameState.tunnelPClassic ?? 0.99;
+        try {
+          // Use 1_000_000 precision secure randomness to match backend sampling
+          let qval = null;
+          if (window.crypto && window.crypto.getRandomValues) {
+            const arr = new Uint32Array(1);
+            window.crypto.getRandomValues(arr);
+            qval = arr[0] % 1000000;
+          } else {
+            qval = Math.floor(Math.random() * 1000000);
+          }
+          const threshold = Math.floor((pClassic) * 1000000);
+          if (qval < threshold) {
+            finalStarter = classicStarter;
+          } else {
+            const candidates = [...Array(numPlayers).keys()].filter(i => i !== classicStarter);
+            // pick securely among candidates
+            if (window.crypto && window.crypto.getRandomValues) {
+              const arr2 = new Uint32Array(1);
+              window.crypto.getRandomValues(arr2);
+              finalStarter = candidates[arr2[0] % candidates.length];
+            } else {
+              finalStarter = candidates[Math.floor(Math.random() * candidates.length)];
+            }
+          }
+        } catch (e) {
+          // Fallback
+          if (Math.random() < pClassic) finalStarter = classicStarter;
+          else {
+            const candidates = [...Array(numPlayers).keys()].filter(i => i !== classicStarter);
+            finalStarter = candidates[Math.floor(Math.random() * candidates.length)];
+          }
+        }
+      }
+
+      // If tunneling changed the starter, move mano indicator and show a brief warning
+      try {
+        if (finalStarter !== classicStarter) {
+          console.log(`[chooseRoundStarter] TUNNEL: classic ${classicStarter + 1} -> ${finalStarter + 1}`);
+          gameState.manoIndex = finalStarter;
+          if (typeof updateManoIndicators === 'function') updateManoIndicators();
+          // Show a small action notification to alert tunneling
+          if (typeof showActionNotification === 'function') showActionNotification(finalStarter, 'tunnel');
+          // Show a central attention banner for all players (local demo)
+          if (typeof showCentralTunnelAlert === 'function') showCentralTunnelAlert(finalStarter);
+          // If online, inform server so it can broadcast to other clients
+          if (window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom) {
+            try {
+              window.QuantumMusSocket.emit('player_action', {
+                room_id: window.QuantumMusOnlineRoom,
+                action: 'tunnel_notify',
+                player_index: 0,
+                data: { to: finalStarter }
+              });
+            } catch (e) {
+              console.warn('[chooseRoundStarter] failed to emit local tunnel notify', e);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[chooseRoundStarter] failed applying tunneling side-effects', e);
+      }
+
+      return finalStarter;
+    } catch (e) {
+      console.warn('[chooseRoundStarter] error, defaulting to classicStarter', e);
+      return classicStarter;
+    }
+  }
+
+  // Show a centered tunnel alert for all players
+  function showCentralTunnelAlert(playerIndex) {
+    try {
+      const id = 'central-tunnel-alert';
+      // Remove existing
+      const existing = document.getElementById(id);
+      if (existing) existing.remove();
+
+      const container = document.createElement('div');
+      container.id = id;
+      container.style.cssText = `
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(255, 200, 50, 0.95);
+        color: #111;
+        padding: 18px 28px;
+        border-radius: 12px;
+        font-size: 1.25rem;
+        font-weight: 700;
+        z-index: 4000;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+        text-align: center;
+      `;
+      // Resolve player name and color from index
+      const idx = (typeof playerIndex === 'number') ? playerIndex : null;
+      const resolvedName = idx !== null ? ((gameState.playerActualNames && gameState.playerActualNames[idx]) || gameState.playerNames[idx] || `Player ${idx + 1}`) : (playerIndex || 'Jugador');
+      const charKey = (idx !== null && gameState.playerCharacters) ? gameState.playerCharacters[idx] : null;
+      const charColor = charKey ? getCharacterColorValue(charKey) : '#2ec4b6';
+      container.innerHTML = `Atención Mano a: <span style="color:${charColor};">${resolvedName}</span> (Túnel)`;
+      document.body.appendChild(container);
+
+      setTimeout(() => {
+        container.style.opacity = '0';
+        setTimeout(() => container.remove(), 300);
+      }, 2200);
+    } catch (e) {
+      console.warn('showCentralTunnelAlert failed', e);
+    }
+  }
+
+  // Apply tunneling for round start (demo/local only)
+  function applyRoundStartTunnel(classicStarter) {
+    try {
+      const classic = (typeof classicStarter === 'number') ? classicStarter : (gameState.manoIndex ?? 0);
+      const finalStarter = chooseRoundStarter(classic);
+      // chooseRoundStarter already sets manoIndex when tunneling occurs,
+      // but ensure active player follows the final starter.
+      gameState.manoIndex = finalStarter;
+      gameState.activePlayerIndex = finalStarter;
+      if (typeof updateManoIndicators === 'function') updateManoIndicators();
+      if (typeof updateRoundDisplay === 'function') updateRoundDisplay();
+      if (typeof updateScoreboard === 'function') updateScoreboard();
+      if (typeof updateButtonStates === 'function') updateButtonStates(gameState.activePlayerIndex === 0);
+      if (typeof startPlayerTurnTimer === 'function') startPlayerTurnTimer(gameState.activePlayerIndex);
+    } catch (e) {
+      console.warn('[applyRoundStartTunnel] failed', e);
+    }
+  }
+
   // Move to Grande round after MUS phase
   function moveToGrandeRound() {
     console.log('[moveToGrandeRound] Moving to GRANDE round');
@@ -917,14 +1295,44 @@ function initGame() {
       const defendingTeam = getOpponentTeam(gameState.currentBet.bettingTeam);
       const manoTeam = getPlayerTeam(gameState.manoIndex);
 
+      // Determine the classical starter for the betting response
+      let classicStarter;
       if (manoTeam === defendingTeam) {
         // Mano belongs to defending team -> mano responds first
-        gameState.activePlayerIndex = gameState.manoIndex;
-        console.log(`[moveToGrandeRound] Betting exists - Mano is on defending team, Mano (Player ${gameState.activePlayerIndex + 1}) responds first`);
+        classicStarter = gameState.manoIndex;
+        console.log(`[moveToGrandeRound] Betting exists - Mano is on defending team, classical responder would be Mano (Player ${classicStarter + 1})`);
       } else {
         // Mano is on betting team -> first defender counter-clockwise from mano responds
-        gameState.activePlayerIndex = getFirstOpponentFromMano(defendingTeam);
-        console.log(`[moveToGrandeRound] Betting exists - first defender counter-clockwise from Mano starts: Player ${gameState.activePlayerIndex + 1}`);
+        classicStarter = getFirstOpponentFromMano(defendingTeam);
+        console.log(`[moveToGrandeRound] Betting exists - classical first defender counter-clockwise from Mano: Player ${classicStarter + 1}`);
+      }
+
+      // Apply tunneling BEFORE the betting decision: tunneling can move the mano.
+      // However, if a bet originated in MUS, skip tunneling for the initial
+      // defender selection (preserve classical order). The pending flag is
+      // cleared when the first betting response is processed.
+      if (gameState._musBetPending) {
+        console.log('[moveToGrandeRound] MUS-originated bet pending - skipping tunneling to preserve defender order');
+        gameState.activePlayerIndex = classicStarter;
+      } else if (gameState.currentBet && gameState.currentBet.betType === 'ordago') {
+        console.log('[moveToGrandeRound] ORDAGO detected - skipping tunneling before defender response to preserve defender order');
+        gameState.activePlayerIndex = classicStarter;
+      } else {
+        try {
+          const finalStarter = chooseRoundStarter(classicStarter);
+          if (finalStarter !== classicStarter) {
+            // Tunneling occurred — move mano to the tunneled player
+            console.log(`[moveToGrandeRound] TUNNEL: classic starter ${classicStarter + 1} -> tunneled starter ${finalStarter + 1}. Moving mano.`);
+            gameState.manoIndex = finalStarter;
+            if (typeof updateManoIndicators === 'function') updateManoIndicators();
+          } else {
+            console.log(`[moveToGrandeRound] No tunnel: classical starter remains Player ${classicStarter + 1}`);
+          }
+          gameState.activePlayerIndex = finalStarter;
+        } catch (e) {
+          console.warn('[moveToGrandeRound] tunneling decision failed, falling back to classical starter', e);
+          gameState.activePlayerIndex = classicStarter;
+        }
       }
     } else {
       // No active bet: Determine who speaks first in GRANDE based on who cut MUS
@@ -945,10 +1353,25 @@ function initGame() {
       }
     }
     
+    // At this point `gameState.activePlayerIndex` holds the classical starter.
+    // Apply tunneling decision immediately when GRANDE starts.
+    // Apply tunneling immediately when GRANDE starts, except during ORDAGO
+    try {
+      if (gameState.currentBet && gameState.currentBet.betType === 'ordago') {
+        console.log('[moveToGrandeRound] ORDAGO active - skipping round-start tunneling to avoid disrupting response order');
+      } else {
+        const classicStarter = gameState.activePlayerIndex;
+        gameState.activePlayerIndex = chooseRoundStarter(classicStarter);
+        console.log(`[moveToGrandeRound] Starter after tunneling decision: Player ${gameState.activePlayerIndex + 1} (classic was ${classicStarter + 1})`);
+      }
+    } catch (e) {
+      console.warn('[moveToGrandeRound] tunneling decision failed, using classic starter', e);
+    }
+
     // Preserve betting team/amount/type if set, or keep clean if no bet
     console.log(`[moveToGrandeRound] GRANDE START - BettingTeam: ${gameState.currentBet.bettingTeam}, Amount: ${gameState.currentBet.amount}, Type: ${gameState.currentBet.betType}`);
     console.log(`[moveToGrandeRound] Starting timer for player ${gameState.activePlayerIndex + 1}`);
-    
+
     updateScoreboard();
     updateRoundDisplay();
     startPlayerTurnTimer(gameState.activePlayerIndex);
@@ -993,6 +1416,8 @@ function initGame() {
       cardIndices.forEach(cardIndex => {
         if (cards[cardIndex]) {
           // Apply discard visual effect
+          // If entanglement glow animation exists, pause it so filter persists
+          try { if (cards[cardIndex].classList.contains('entangled-card') || cards[cardIndex].classList.contains('entangled-candidate')) cards[cardIndex].style.setProperty('animation', 'none', 'important'); } catch (e) {}
           cards[cardIndex].style.transform = 'translateY(-15px) scale(0.95)';
           cards[cardIndex].style.filter = 'grayscale(100%) brightness(0.3)';
           cards[cardIndex].style.transition = 'all 0.3s ease-out';
@@ -1168,11 +1593,24 @@ function initGame() {
         }
       } else {
         // No bet yet - check if all players have passed
-        const allResponses = Object.values(gameState.currentBet.responses);
-        const allPassed = allResponses.length === 4 && allResponses.every(r => r === 'paso');
-        
+        // Determine eligible players for this round. In PARES only players who declared
+        // 'tengo' (true) or 'puede' can participate — only they count towards an "all pass".
+        let eligiblePlayers;
+        if (gameState.currentRound === 'PARES' && gameState.paresDeclarations) {
+          eligiblePlayers = [0,1,2,3].filter(p => {
+            const decl = gameState.paresDeclarations[p];
+            return decl === true || decl === 'puede' || decl === 'tengo_after_penalty';
+          });
+        } else {
+          eligiblePlayers = [0,1,2,3];
+        }
+
+        const responses = gameState.currentBet.responses || {};
+        const responsesForEligible = eligiblePlayers.map(p => responses[p]);
+        const allPassed = eligiblePlayers.length > 0 && responsesForEligible.every(r => r === 'paso');
+
         if (allPassed) {
-          console.log('All 4 players passed with no bet - moving to next round');
+          console.log('All eligible players passed with no bet - moving to next round', { eligiblePlayers });
           setTimeout(() => {
             if (gameState.currentRound === 'PARES') moveToNextRound('JUEGO');
             else moveToNextRound();
@@ -1424,9 +1862,48 @@ function initGame() {
       resetRoundState();
     }
 
-    // Always start new round from mano
-    gameState.activePlayerIndex = gameState.manoIndex;
-    console.log(`[MOVE TO ROUND] Moving to ${gameState.currentRound}. Starting with mano (Player ${gameState.manoIndex + 1})`);
+    // Determine starting player for this round. Allow frontend demo tunneling
+    // so you can observe dynamics even without server-side quantum RNG.
+    try {
+      const numPlayers = 4;
+      const classicStart = gameState.manoIndex;
+      let roundStart;
+
+      if (gameState.forceTunnelNextRound) {
+        const candidates = [...Array(numPlayers).keys()].filter(i => i !== classicStart);
+        roundStart = candidates[Math.floor(Math.random() * candidates.length)];
+        // Keep the demo force flag persistent so tunneling can occur across
+        // consecutive rounds when the developer/tester requests it.
+        console.log('[MOVE TO ROUND] Forced tunneling applied for demo (persistent).');
+      } else {
+        const pClassic = gameState.tunnelPClassic ?? 0.99;
+        if (Math.random() < pClassic) {
+          roundStart = classicStart;
+        } else {
+          const candidates = [...Array(numPlayers).keys()].filter(i => i !== classicStart);
+          roundStart = candidates[Math.floor(Math.random() * candidates.length)];
+          console.log('[MOVE TO ROUND] Tunneling occurred (demo random).');
+        }
+      }
+
+      gameState.activePlayerIndex = roundStart;
+      console.log(`[MOVE TO ROUND] Moving to ${gameState.currentRound}. Starting with Player ${gameState.activePlayerIndex + 1} (mano = ${gameState.manoIndex + 1})`);
+      // Apply demo tunneling only for betting rounds (GRANDE/CHICA).
+      // For declaration rounds (PARES/JUEGO) tunneling must occur once
+      // inside the declaration flow to avoid duplicate application.
+      if (gameState.currentRound === 'GRANDE' || gameState.currentRound === 'CHICA') {
+        try {
+          const classic = gameState.manoIndex ?? 0;
+          const finalStarter = chooseRoundStarter(classic);
+          gameState.activePlayerIndex = finalStarter;
+        } catch (e) {
+          // ignore
+        }
+      }
+    } catch (e) {
+      gameState.activePlayerIndex = gameState.manoIndex;
+      console.warn('[MOVE TO ROUND] Tunneling logic failed, defaulting to mano start', e);
+    }
 
     updateRoundDisplay();
 
@@ -1682,6 +2159,19 @@ function initGame() {
   // eligibility depends on their declarations (tengo/puede/no tengo) and
   // potentially on the actual collapsed cards.
   function canPlayerBet(playerIndex) {
+    try {
+      const decl = gameState.currentRound === 'PARES' ? gameState.paresDeclarations?.[playerIndex] : gameState.juegoDeclarations?.[playerIndex];
+      const handState = gameState.playerHands && gameState.playerHands[playerIndex];
+      const playerId = `player${playerIndex + 1}`;
+      const cardElements = Array.from(document.querySelectorAll(`#${playerId}-zone .quantum-card`)).map(c => ({
+        entangled: c.dataset.entangled,
+        collapsed: c.dataset.collapsed,
+        value: c.dataset.value || c.dataset.mainValue
+      }));
+      console.debug(`[canPlayerBet] player=${playerIndex + 1} round=${gameState.currentRound} decl=`, decl, 'handState=', handState, 'domCards=', cardElements);
+    } catch (e) {
+      console.debug('[canPlayerBet] debug gather failed', e);
+    }
     // PUNTO is special: anyone can bet
     if (gameState.currentRound === 'PUNTO') return true;
 
@@ -1695,7 +2185,8 @@ function initGame() {
       ? gameState.paresDeclarations?.[playerIndex]
       : gameState.juegoDeclarations?.[playerIndex];
 
-    // If they declared NO TENGO (false), they can't bet
+    // If they declared NO TENGO (false), they can't bet (except a special
+    // post-penalty state 'tengo_after_penalty' which should be allowed)
     if (declaration === false) return false;
 
     // Check whether their cards have collapsed; if collapsed, verify they
@@ -1720,8 +2211,9 @@ function initGame() {
       }
     }
 
-    // If not all collapsed, allow betting if they declared TENGO or PUEDE
-    return declaration === true || declaration === 'puede';
+    // If not all collapsed, allow betting if they declared TENGO, PUEDE
+    // or were marked as post-penalty tengo ('tengo_after_penalty').
+    return declaration === true || declaration === 'puede' || declaration === 'tengo_after_penalty';
   }
   
   // Get next player who can bet in current round
@@ -1729,7 +2221,9 @@ function initGame() {
     let attempts = 0;
     while (attempts < 4) {
       nextPlayer();
+      console.debug(`[nextPlayerWhoCanBet] testing player ${gameState.activePlayerIndex + 1} (attempt ${attempts + 1})`);
       if (canPlayerBet(gameState.activePlayerIndex)) {
+        console.debug(`[nextPlayerWhoCanBet] found eligible player ${gameState.activePlayerIndex + 1}`);
         return;
       }
       attempts++;
@@ -1741,7 +2235,21 @@ function initGame() {
   function startParesDeclaration() {
     console.log('Starting PARES declaration');
     gameState.paresDeclarations = {};
-    gameState.activePlayerIndex = gameState.manoIndex;
+    // Reset tunnel-application guard for this declaration phase.
+    proceedWithParesDeclaration._tunnelApplied = false;
+    // Apply tunneling BEFORE declaration start so a tunneled mano declares first.
+    try {
+      const classic = gameState.manoIndex;
+      const finalStarter = chooseRoundStarter(classic);
+      gameState.activePlayerIndex = finalStarter;
+      // If tunneling changed mano, mark that we've applied it for this phase
+      if (finalStarter !== classic) {
+        proceedWithParesDeclaration._tunnelApplied = true;
+      }
+    } catch (e) {
+      console.warn('[startParesDeclaration] chooseRoundStarter failed', e);
+      gameState.activePlayerIndex = gameState.manoIndex;
+    }
     // Show declaration banner then proceed
     showDeclarationBanner('PARES', proceedWithParesDeclaration);
   }
@@ -1910,21 +2418,43 @@ function initGame() {
                             declaration === false ? 'no_pares' : 'puede_pares';
     showActionNotification(playerIndex, notificationType);
     
+    // If this was a manual declaration, stop this player's timer and (if local) pass turn immediately
+    if (!isAutoDeclared) {
+      if (timerInterval) {
+        clearTimeout(timerInterval);
+        timerInterval = null;
+      }
+      hideTimerBar(playerIndex);
+      const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
+      if (isOnlineGame) {
+        // Online: wait for server to perform collapse and broadcast; don't change activePlayerIndex locally
+        try { window._waitingServerDeclaration = { playerIndex, roundName: 'PARES', ts: Date.now() }; } catch (e) {}
+      } else {
+        // Local mode: advance immediately
+        nextPlayer();
+        startPlayerTurnTimer(gameState.activePlayerIndex);
+      }
+    }
+
     // Collapse cards if declaration is manual and TENGO or NO TENGO (with animation)
     if (!isAutoDeclared && (declaration === true || declaration === false)) {
       console.log(`[PARES DECLARATION] Player ${playerIndex + 1} declared ${declaration ? 'TENGO' : 'NO TENGO'} - collapsing cards`);
-      collapseOnDeclaration(playerIndex, 'PARES', declaration);
+      // If online, ask server to perform collapse so all clients see same result
+      const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
+      if (isOnlineGame && typeof makeDeclaration === 'function') {
+        const declStr = declaration === true ? 'tengo' : 'no_tengo';
+        try { makeDeclaration(playerIndex, declStr, 'PARES'); } catch (e) { /* ignore */ }
+      } else {
+        collapseOnDeclaration(playerIndex, 'PARES', declaration);
+      }
     }
     
     // Check if all players declared
     if (Object.keys(gameState.paresDeclarations).length < 4) {
       // Still need more declarations - move to next player
       if (!isAutoDeclared) {
-        // Manual declaration - continue to next player after 2s to match pacing
-        setTimeout(() => {
-          nextPlayer();
-          proceedWithParesDeclaration();
-        }, 2000);
+        // We already advanced the turn immediately for manual declarations
+        proceedWithParesDeclaration();
       }
       return;
     }
@@ -1934,15 +2464,22 @@ function initGame() {
   }
   
   function handleAllParesDeclarationsDone() {
+    try {
+      console.debug('[handleAllParesDeclarationsDone] paresDeclarations=', gameState.paresDeclarations, 'playerHands=', gameState.playerHands);
+    } catch (e) {
+      console.debug('[handleAllParesDeclarationsDone] debug gather failed', e);
+    }
     // Count declarations per team
-    const team1TengoCount = gameState.teams.team1.players.filter(p => gameState.paresDeclarations[p] === true).length;
-    const team2TengoCount = gameState.teams.team2.players.filter(p => gameState.paresDeclarations[p] === true).length;
-    
+    // Treat 'tengo_after_penalty' as a TENGO for counting/eligibility purposes
+    const isTengo = (val) => val === true || val === 'tengo_after_penalty';
+    const team1TengoCount = gameState.teams.team1.players.filter(p => isTengo(gameState.paresDeclarations[p])).length;
+    const team2TengoCount = gameState.teams.team2.players.filter(p => isTengo(gameState.paresDeclarations[p])).length;
+
     const team1PuedeOrTengoCount = gameState.teams.team1.players.filter(p => 
-      gameState.paresDeclarations[p] === true || gameState.paresDeclarations[p] === 'puede'
+      isTengo(gameState.paresDeclarations[p]) || gameState.paresDeclarations[p] === 'puede'
     ).length;
     const team2PuedeOrTengoCount = gameState.teams.team2.players.filter(p => 
-      gameState.paresDeclarations[p] === true || gameState.paresDeclarations[p] === 'puede'
+      isTengo(gameState.paresDeclarations[p]) || gameState.paresDeclarations[p] === 'puede'
     ).length;
     
     console.log(`PARES declarations - Team1 tengo: ${team1TengoCount}, puede/tengo: ${team1PuedeOrTengoCount}`);
@@ -1971,14 +2508,30 @@ function initGame() {
         responses: {}
       };
       
-      // Start from mano, but if mano can't bet, move to next eligible player
-      gameState.activePlayerIndex = gameState.manoIndex;
-      if (!canPlayerBet(gameState.activePlayerIndex)) {
-        console.log(`Mano (Player ${gameState.manoIndex + 1}) cannot bet, finding next eligible player`);
-        nextPlayerWhoCanBet();
+      // Start from mano. If tunneling was NOT already applied at declaration
+      // start, apply it now once. This avoids repeated tunneling loops.
+      try {
+        if (!proceedWithParesDeclaration._tunnelApplied) {
+          const classicStart = gameState.manoIndex;
+          const finalStart = chooseRoundStarter(classicStart);
+          gameState.activePlayerIndex = finalStart;
+          proceedWithParesDeclaration._tunnelApplied = true;
+        } else {
+          gameState.activePlayerIndex = gameState.manoIndex;
+        }
+
+        // If chosen starter cannot bet, find next eligible player
+        if (!canPlayerBet(gameState.activePlayerIndex)) {
+          console.log(`Chosen starter (Player ${gameState.activePlayerIndex + 1}) cannot bet, finding next eligible player`);
+          nextPlayerWhoCanBet();
+        }
+      } catch (e) {
+        gameState.activePlayerIndex = gameState.manoIndex;
+        if (!canPlayerBet(gameState.activePlayerIndex)) nextPlayerWhoCanBet();
       }
       
       console.log(`Starting PARES betting with Player ${gameState.activePlayerIndex + 1}`);
+      // Keep `paresDeclarations` intact so server/client betting eligibility checks work
       
       // Force UI update to show betting buttons
       console.log('Updating UI for PARES betting phase');
@@ -2002,9 +2555,18 @@ function initGame() {
           }, 15000); // 15 seconds safety timeout
 
       // Ensure juego declarations are reset and preserve any preJuegoDeclarations
+      // Clear PARES declaration state to avoid AI confusion
+      try { gameState.paresDeclarations = undefined; } catch (e) { gameState.paresDeclarations = null; }
       gameState.currentRound = 'JUEGO';
       gameState.juegoDeclarations = {};
-      gameState.activePlayerIndex = gameState.manoIndex;
+      // Apply demo tunneling for JUEGO start as well
+      try {
+        const classicStart = gameState.manoIndex;
+        const finalStart = chooseRoundStarter(classicStart);
+        gameState.activePlayerIndex = finalStart;
+      } catch (e) {
+        gameState.activePlayerIndex = gameState.manoIndex;
+      }
 
       // Reset bet state to avoid stray bets
       resetRoundState();
@@ -2165,8 +2727,21 @@ function initGame() {
     console.log('Starting JUEGO declaration');
     console.log('[TRACE] startJuegoDeclaration - currentRound:', gameState.currentRound, 'mano:', gameState.manoIndex);
     gameState.juegoDeclarations = {};
+    // Reset tunnel-application guard for this declaration phase.
+    proceedWithJuegoDeclaration._tunnelApplied = false;
+    // Apply tunneling BEFORE declaration start so a tunneled mano declares first.
+    try {
+      const classic = gameState.manoIndex;
+      const finalStarter = chooseRoundStarter(classic);
+      gameState.activePlayerIndex = finalStarter;
+      if (finalStarter !== classic) {
+        proceedWithJuegoDeclaration._tunnelApplied = true;
+      }
+    } catch (e) {
+      console.warn('[startJuegoDeclaration] chooseRoundStarter failed', e);
+      gameState.activePlayerIndex = gameState.manoIndex;
+    }
     // Don't clear preJuegoDeclarations here - use them in proceedWithJuegoDeclaration
-    gameState.activePlayerIndex = gameState.manoIndex;
     // Show JUEGO declaration banner then proceed
     showDeclarationBanner('JUEGO', proceedWithJuegoDeclaration);
   }
@@ -2180,6 +2755,13 @@ function initGame() {
   window.debugForceAllNoJuego = debugForceAllNoJuego;
   
   function proceedWithJuegoDeclaration() {
+    // Ensure tunneling is applied at the start of the JUEGO declaration phase
+    if (!proceedWithJuegoDeclaration._tunnelApplied) {
+      try {
+        applyRoundStartTunnel(gameState.manoIndex);
+      } catch (e) { /* ignore */ }
+      proceedWithJuegoDeclaration._tunnelApplied = true;
+    }
     console.log('[TRACE] proceedWithJuegoDeclaration - activePlayerIndex:', gameState.activePlayerIndex, 'preJuego:', gameState.preJuegoDeclarations);
     // Process declarations for all players in order starting from current active player
     if (Object.keys(gameState.juegoDeclarations).length === 4) {
@@ -2333,10 +2915,32 @@ function initGame() {
                             hasJuego === false ? 'no_juego' : 'puede_juego';
     showActionNotification(playerIndex, notificationType);
     
+    // If this was a manual declaration, stop this player's timer and (if local) pass turn immediately
+    if (!isAutoDeclared) {
+      if (timerInterval) {
+        clearTimeout(timerInterval);
+        timerInterval = null;
+      }
+      hideTimerBar(playerIndex);
+      const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
+      if (isOnlineGame) {
+        try { window._waitingServerDeclaration = { playerIndex, roundName: 'JUEGO', ts: Date.now() }; } catch (e) {}
+      } else {
+        nextPlayer();
+        startPlayerTurnTimer(gameState.activePlayerIndex);
+      }
+    }
+
     // Collapse cards on manual declaration (same as PARES behavior)
     // Trigger collapse for manual TENGO or NO TENGO declarations
     if ((hasJuego === true || hasJuego === false) && !isAutoDeclared) {
-      collapseOnDeclaration(playerIndex, 'JUEGO', hasJuego);
+      const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
+      if (isOnlineGame && typeof makeDeclaration === 'function') {
+        const declStr = hasJuego === true ? 'tengo' : 'no_tengo';
+        try { makeDeclaration(playerIndex, declStr, 'JUEGO'); } catch (e) { /* ignore */ }
+      } else {
+        collapseOnDeclaration(playerIndex, 'JUEGO', hasJuego);
+      }
     }
 
     // Check if all players declared
@@ -2372,6 +2976,11 @@ function initGame() {
       // No one has JUEGO - start PUNTO betting
       console.log('No one has JUEGO (all NO JUEGO or PUEDE) - starting PUNTO betting');
       gameState.currentRound = 'PUNTO';
+      // Set guard to prevent premature moveToNextRound calls during PUNTO startup
+      try {
+        gameState._puntoStartGuard = true;
+        setTimeout(() => { gameState._puntoStartGuard = false; }, 1500);
+      } catch (e) {}
       gameState.activePlayerIndex = gameState.manoIndex;
       gameState.currentBet.bettingTeam = null;
       
@@ -2949,7 +3558,8 @@ function initGame() {
             const idx = parseInt(k, 10);
             const decl = gameState.paresDeclarations[idx];
             if (decl !== undefined) {
-              checkPredictionPenalty(idx, 'PARES', decl === 'tengo' || decl === true);
+              const boolDecl = decl === true || decl === 'tengo' || decl === 'tengo_after_penalty';
+              checkPredictionPenalty(idx, 'PARES', boolDecl);
             }
           });
         }
@@ -3099,8 +3709,36 @@ function initGame() {
     gameState.currentRound = 'MUS';
     gameState.musPhaseActive = true;
     const previousMano = gameState.manoIndex;
-    gameState.manoIndex = (gameState.manoIndex - 1 + 4) % 4; // Rotate mano counter-clockwise (4→3→2→1→4)
-    gameState.activePlayerIndex = gameState.manoIndex;
+
+    // Determine next mano with optional tunneling for demo inspection
+    try {
+      const numPlayers = 4;
+      const classicNext = (gameState.manoIndex - 1 + numPlayers) % numPlayers; // counter-clockwise
+      let nextMano;
+
+      if (gameState.forceTunnelNextHand) {
+        const candidates = [...Array(numPlayers).keys()].filter(i => i !== classicNext);
+        nextMano = candidates[Math.floor(Math.random() * candidates.length)];
+        gameState.forceTunnelNextHand = false;
+        console.log('[NEW HAND] Forced mano tunneling applied for demo.');
+      } else {
+        const pClassic = gameState.tunnelPClassic ?? 0.99;
+        if (Math.random() < pClassic) {
+          nextMano = classicNext;
+        } else {
+          const candidates = [...Array(numPlayers).keys()].filter(i => i !== classicNext);
+          nextMano = candidates[Math.floor(Math.random() * candidates.length)];
+          console.log('[NEW HAND] Mano tunneling occurred (demo random).');
+        }
+      }
+
+      gameState.manoIndex = nextMano;
+      gameState.activePlayerIndex = gameState.manoIndex;
+    } catch (e) {
+      gameState.manoIndex = (gameState.manoIndex - 1 + 4) % 4; // Rotate mano counter-clockwise (fallback)
+      gameState.activePlayerIndex = gameState.manoIndex;
+      console.warn('[NEW HAND] Tunneling logic failed, defaulting to classic rotation', e);
+    }
     resetRoundState();
     // Clear declaration maps and pre-declarations for a fresh mano
     gameState.paresDeclarations = undefined;
@@ -3343,36 +3981,51 @@ function initGame() {
     }
     const isMano = player.id === window.startingPlayer;
 
-    // Character Avatar
+    // Character Avatar (use character color so lobby and game match)
     const avatar = document.createElement('div');
     avatar.className = `character-avatar ${player.character}`;
     avatar.style.cursor = 'pointer';
     avatar.style.position = 'relative';
+    // Frame avatar with character color (ensures lobby/game consistency)
+    try {
+      const frameColor = getCharacterColorValue(player.character) || getPlayerColorValue(index) || '#2ec4b6';
+      avatar.style.border = `2px solid ${frameColor}`;
+      avatar.style.borderRadius = '8px';
+      avatar.style.padding = '4px';
+    } catch (e) {}
     
-    // Character descriptions
+    // Character descriptions (last name only as key)
     const characterDescriptions = {
-      'Preskill': '<strong>John Preskill (1961-presente)</strong><br><br>Pionero teórico en información cuántica e informática cuántica. Preskill es el Profesor Richard P. Feynman de Física Teórica en Caltech y una autoridad destacada en corrección de errores cuánticos y el camino hacia computadoras cuánticas prácticas.<br><br><strong>Símbolo de la Carta:</strong> El código de corrección de errores (círculos anidados) representa códigos de corrección de errores cuánticos - mecanismos esenciales que protegen la información cuántica de la decoherencia y el ruido ambiental, haciendo posibles computadoras cuánticas confiables.<br><br><strong>Contribución:</strong> Desarrolló marcos fundamentales para corrección de errores cuánticos, estableció el concepto de era "NISQ" (Noisy Intermediate-Scale Quantum), y continúa guiando la realización práctica de computadoras cuánticas en el mundo real.',
-      'Cirac': '<strong>Ignacio Cirac (1965-presente)</strong><br><br>Científico de información cuántica líder que revolucionó la teoría de la informática cuántica. Cirac es reconocido por desarrollar protocolos de simulación cuántica y demostrar cómo construir computadoras cuánticas usando iones atrapados.<br><br><strong>Símbolo de la Carta:</strong> La representación de trampa de iones (tres puntos dispuestos en un patrón) simboliza iones atrapados dispuestos en una configuración lineal - los componentes fundamentales para la computación cuántica en su enfoque.<br><br><strong>Contribución:</strong> Su trabajo sobre entrelazamiento cuántico y sistemas de muchos cuerpos creó el fundamento teórico para computadoras y simuladores cuánticos modernos.',
-      'Zoller': '<strong>Peter Zoller (1952-presente)</strong><br><br>Distinguido físico cuántico especializado en computación cuántica con iones atrapados. Zoller desarrolló protocolos detallados para manipular y medir estados cuánticos usando iones enfriados por láser.<br><br><strong>Símbolo de la Carta:</strong> La celosía cuántica (puntos interconectados) representa la disposición geométrica de iones atrapados en una computadora cuántica, mostrando cómo los bits cuánticos individuales se comunican e se enredan entre sí.<br><br><strong>Contribución:</strong> Sus protocolos transformaron sistemas de iones atrapados en computadoras cuánticas prácticas, proporcionando instrucciones paso a paso para operaciones de puertas cuánticas que se implementan en el hardware cuántico actual.',
-      'Deutsch': '<strong>David Deutsch (1953-presente)</strong><br><br>Fundador de la teoría de la computación cuántica - el primero en reconocer que las computadoras cuánticas podrían resolver problemas exponencialmente más rápido que las computadoras clásicas. Su trabajo revolucionario estableció algoritmos cuánticos como un nuevo paradigma computacional.<br><br><strong>Símbolo de la Carta:</strong> La representación de circuito cuántico (caja con círculo y punto) simboliza una puerta cuántica - las operaciones computacionales fundamentales que manipulan bits cuánticos y forman la base de algoritmos cuánticos.<br><br><strong>Contribución:</strong> Probó que el principio Church-Turing se extiende a la mecánica cuántica y creó el algoritmo de Deutsch, el primer algoritmo cuántico que demuestra ventaja computacional sobre métodos clásicos.'
+      'Preskill': '<strong>John Preskill (1961-presente)</strong><br><br>Pionero teórico en información cuántica e informática cuántica. Preskill es el Profesor Richard P. Feynman de Física Teórica en Caltech y una autoridad destacada en corrección de errores cuánticos y el camino hacia computadoras cuánticas prácticas. Su trabajo fundamental en códigos cuánticos ha transformado la forma en que entendemos la protección de información cuántica.<br><br><strong>Símbolo de la Carta:</strong> El código de corrección de errores (círculos anidados) representa códigos de corrección de errores cuánticos - mecanismos esenciales que protegen la información cuántica de la decoherencia y el ruido ambiental, haciendo posibles computadoras cuánticas confiables. Los círculos concéntricos simbolizan las capas redundantes de protección contra errores qubit.<br><br><strong>Contribución:</strong> Desarrolló marcos fundamentales para corrección de errores cuánticos, estableció el concepto de era "NISQ" (Noisy Intermediate-Scale Quantum), y continúa guiando la realización práctica de computadoras cuánticas en el mundo real. Sus predicciones sobre la viabilidad de computadores cuánticos prácticos han influenciado toda la industria cuántica moderna.',
+      'Zoller': '<strong>Peter Zoller (1952-presente)</strong><br><br>Distinguido físico cuántico especializado en computación cuántica con iones atrapados. Zoller desarrolló protocolos detallados para manipular y medir estados cuánticos usando iones enfriados por láser, revolucionando la implementación práctica de la computación cuántica. Como colega de Cirac en Max Planck, sus contribuciones teóricas han sido fundamentales para el desarrollo experimental de computadoras cuánticas.<br><br><strong>Símbolo de la Carta:</strong> La celosía cuántica (puntos interconectados) representa la disposición geométrica de iones atrapados en una computadora cuántica, mostrando cómo los bits cuánticos individuales se comunican e se enredan entre sí. Las líneas conectantes simbolizan las interacciones de largo alcance entre iones mediadas por fotones.<br><br><strong>Contribución:</strong> Sus protocolos transformaron sistemas de iones atrapados en computadoras cuánticas prácticas, proporcionando instrucciones paso a paso para operaciones de puertas cuánticas que se implementan en los laboratorios de investigación más avanzados. El protocolo Cirac-Zoller es utilizado hasta hoy en experimentos de vanguardia.',
+      'Cirac': '<strong>Ignacio Cirac (1965-presente)</strong><br><br>Científico de información cuántica líder que revolucionó la teoría de la informática cuántica. Cirac es reconocido por desarrollar protocolos de simulación cuántica y demostrar cómo construir computadoras cuánticas usando iones atrapados. Trabaja en el Instituto Max Planck de Óptica Cuántica y ha sido instrumental en entender cómo sistemas cuánticos simples pueden simular sistemas cuánticos complejos.<br><br><strong>Símbolo de la Carta:</strong> La representación de trampa de iones (tres puntos dispuestos en un patrón) simboliza iones atrapados dispuestos en una configuración lineal - los componentes fundamentales para la computación cuántica en su enfoque. Cada punto representa un ion que puede ser manipulado y medido con precisión extraordinaria.<br><br><strong>Contribución:</strong> Su trabajo sobre entrelazamiento cuántico y sistemas de muchos cuerpos creó el fundamento teórico para computadoras y simuladores cuánticos modernos. Desarrolló el protocolo Cirac-Zoller, piedra angular para implementar compuertas de dos qubits en sistemas de iones atrapados.',
+      'Simmons': '<strong>Michelle Simmons (1967-presente)</strong><br><br>Física australiana pionera en computación cuántica a escala atómica. Simmons es directora del Centro de Excelencia en Tecnologías Cuánticas de Australia y ha revolucionado la forma en que construimos dispositivos cuánticos usando silicio. Su trabajo utiliza microscopía de efecto túnel escanificado para posicionar átomos individuales de fósforo en silicio, creando transistores de un solo átomo y sistemas cuánticos de precisión extrema.<br><br><strong>Símbolo de la Carta:</strong> El átomo de fósforo puntualmente posicionado en una red de silicio representa la precisión extraordinaria del enfoque de Simmons en ingeniería cuántica a escala atómica. Cada posición de átomo es controlada con precisión de picómetros, permitiendo circuitos cuánticos integrados únicos.<br><br><strong>Contribución:</strong> Creó el primer transistor de un solo átomo y demostró que los sistemas de silicio pueden mantener coherencia cuántica lo suficientemente larga como para computación práctica. Su "quantum atom engineering" ha abierto una ruta totalmente nueva hacia computadoras cuánticas escalables que usan tecnología familiar de semiconductores.',
+      'Broadbent': '<strong>Anne Broadbent (1978-presente)</strong><br><br>Destacada criptógrafa cuántica y teórica de información cuántica. Broadbent ha realizado contribuciones fundamentales a la criptografía cuántica y especialmente a la computación cuántica delegada - cómo un cliente puede verificar que un servidor ha realizado cálculos cuánticos correctamente. Su trabajo combina rigor matemático con aplicaciones prácticas en seguridad cuántica.<br><br><strong>Símbolo de la Carta:</strong> El símbolo de candado con seguridad representa el enfoque de Broadbent en proteger y verificar la integridad de información cuántica. La seguridad cuántica es fundamental para confiar en sistemas cuánticos en aplicaciones del mundo real, desde comunicaciones hasta computacion cuántica delegada.<br><br><strong>Contribución:</strong> Desarrolló protocolos revolucionarios para computacion cuántica delegada que permiten verificar resultados de computadoras cuánticas sin poseer una propia. Sus contribuciones en criptografía cuántica han establecido estándares para seguridad en sistemas de información cuántica.',
+      'Deutsch': '<strong>David Deutsch (1953-presente)</strong><br><br>Fundador de la teoría de la computación cuántica - el primero en reconocer que las computadoras cuánticas podrían resolver problemas exponencialmente más rápido que las computadoras clásicas. Su trabajo revolucionario estableció algoritmos cuánticos como un nuevo paradigma computacional y sentó las bases para toda la industria cuántica moderna. Trabaja en la Universidad de Oxford y es un filósofo además de físico, explorando las implicaciones profundas de la mecánica cuántica.<br><br><strong>Símbolo de la Carta:</strong> La representación de circuito cuántico (caja con círculo y punto) simboliza una puerta cuántica - las operaciones computacionales fundamentales que manipulan bits cuánticos y forman la base de algoritmos cuánticos. La estructura representa el flujo de información a través de operaciones controladas.<br><br><strong>Contribución:</strong> Probó que el principio Church-Turing se extiende a la mecánica cuántica y creó el algoritmo de Deutsch, el primer algoritmo cuántico que demuestra ventaja computacional sobre métodos clásicos. Su visión de computadoras cuánticas universales pavimentó el camino para el desarrollo teórico de algoritmos como Shor y Grover.',
+      'Yunger Halpern': '<strong>Nicole Yunger Halpern (Halpern, 1987-presente)</strong><br><br>Física teórica innovadora especializada en termodinámica cuántica y conexiones entre mecánica cuántica y fenómenos del mundo real observable. Yunger Halpern trabaja en la División de Física del Laboratorio Nacional de Tiempo Estándar de NIST y es conocida por su creatividad en conectar conceptos cuánticos esotéricos con aplicaciones prácticas. Su investigación explora cómo la información cuántica se comporta bajo condiciones termodinámicas reales.<br><br><strong>Símbolo de la Carta:</strong> El símbolo de engranaje steampunk representa la combinación ingeniosa de Yunger Halpern de ideas antiguas de la física con nuevas perspectivas cuánticas. Los engranajes simbolizan cómo diferentes conceptos mecánicos (termodinámica clásica y mecánica cuántica) pueden interconectarse de maneras sorprendentes.<br><br><strong>Contribución:</strong> Reveló conexiones profundas entre entrelazamiento cuántico y fenómenos termodinámicos, mostrando cómo sistemas cuánticos pueden desafiar intuiciones clásicas. Su serie educativa divulgando ciencia cuántica ha inspirado a generaciones de estudiantes a explorar la magia de la mecánica cuántica.',
+      'Hallberg': '<strong>Karen Hallberg (1960-presente)</strong><br><br>Eminente física teórica argentina especializada en sistemas cuánticos fuertemente correlacionados y métodos computacionales para resolver problemas cuánticos complejos. Hallberg es investigadora principal en el Centro Atómico Bariloche y ha desarrollado técnicas sofisticadas para entender sistemas donde las aproximaciones simples fallan. Su trabajo en ciencia de materiales cuánticos ha abierto nuevas rutas para diseñar materiales con propiedades cuánticas útiles.<br><br><strong>Símbolo de la Carta:</strong> Los símbolos de estructura molecular interconectada representan el enfoque de Hallberg en entender cómo los átomos se combinan para crear comportamientos cuánticos colectivos. Las conexiones entre moléculas simbolizan los entrelamientos cuánticos complejos que emergen en sistemas muchos-cuerpos.<br><br><strong>Contribución:</strong> Desarrolló métodos numéricos innovadores (como método DMRG adaptado) para simular sistemas cuánticos que de otro modo serían intratables computacionalmente, permitiendo la predicción de propiedades de nuevos materiales cuánticos y diseño racional de dispositivos cuánticos.'
     };
     
+    // Always use last name, and color from player.color
     avatar.innerHTML = `
-      <div class="character-portrait">
-        ${CardGenerator.generateCharacter(player.name)}
+      <div class="character-portrait" style="position: relative;">
+        ${CardGenerator.generateCharacter(player.name, player.color || getCharacterColorValue(player.character))}
       </div>
-      <div class="character-name" style="color: var(--quantum-${getCharacterColor(player.character)})">
+      <div class="character-name" style="color: ${player.color || getCharacterColorValue(player.character)}">
         ${player.name}${displayName}
       </div>
-      <div class="character-score" style="color: var(--quantum-${getCharacterColor(player.character)})" data-score="0">
+      <div class="character-score" style="color: ${player.color || getCharacterColorValue(player.character)}" data-score="0">
         (0)
       </div>
-      ${isMano ? `<div class="atom-indicator" title="Mano - Comienza el juego">${CardGenerator.generateAtomIndicator(getCharacterColorValue(player.character))}</div>` : ''}
+      ${isMano ? `<div class="atom-indicator" title="Mano - Comienza el juego">${CardGenerator.generateAtomIndicator(player.color || getCharacterColorValue(player.character))}</div>` : ''}
     `;
     
-    // Add click event for character description
+    // Add click event for character description (show colored header)
     avatar.addEventListener('click', () => {
-      showCharacterModal(player.name, characterDescriptions[player.name]);
+      // Always use last name for description lookup
+      const desc = characterDescriptions[player.name] || '';
+      const color = player.color || getCharacterColorValue(player.character) || '#2ec4b6';
+      showCharacterModal(player.name, desc, color);
     });
 
     // Hand Container
@@ -3509,6 +4162,11 @@ function initGame() {
     
     // Clean card styles to ensure hover works properly
     cleanCardStyles();
+
+    // Reset per-player timeout-consumed flag so this player's automatic action
+    // can be executed exactly once when the timer expires.
+    gameState.playerTimeoutConsumed = gameState.playerTimeoutConsumed || [false, false, false, false];
+    gameState.playerTimeoutConsumed[index] = false;
     
     // Update visual feedback for active player
     updateActivePlayerHighlight(index);
@@ -3604,10 +4262,16 @@ function initGame() {
       }
     }
     
-    // Add highlight to active player
+    // Add highlight to active player using character colors (match lobby)
     const activeZone = document.querySelector(`#player${index + 1}-zone`);
     if (activeZone) {
-      const colors = ['#2ec4b6', '#ff9e6d', '#a78bfa', '#f5c518'];
+      // Build colors array from assigned character keys (fallback to seat colors)
+      const colors = [];
+      for (let i = 0; i < 4; i++) {
+        const charKey = (gameState.playerCharacters && gameState.playerCharacters[i]) || null;
+        const col = charKey ? getCharacterColorValue(charKey) : getPlayerColorValue(i);
+        colors.push(col);
+      }
       activeZone.style.boxShadow = `0 0 30px ${colors[index]}`;
       activeZone.style.transition = 'box-shadow 0.3s';
     }
@@ -3666,6 +4330,11 @@ function initGame() {
           fill.style.transition = `width ${duration}s linear`;
           fill.style.width = '0%'; // Empty to 0%
         });
+        // Debug: log timer bar presence for this player
+        try { console.log(`[TIMER START] player=${i + 1} timerBarFound=true`); } catch (e) {}
+      }
+      else {
+        try { console.log(`[TIMER START] player=${i + 1} timerBarFound=false`); } catch (e) {}
       }
     }
     
@@ -3758,6 +4427,15 @@ function initGame() {
       return;
     }
     
+    // If this player's timeout has already been consumed, ignore duplicate calls
+    gameState.playerTimeoutConsumed = gameState.playerTimeoutConsumed || [false, false, false, false];
+    if (gameState.playerTimeoutConsumed[playerIndex]) {
+      console.log(`[TIMEOUT] Already handled for player ${playerIndex + 1}, skipping duplicate`);
+      return;
+    }
+    // Mark as consumed immediately to avoid races
+    gameState.playerTimeoutConsumed[playerIndex] = true;
+
     // Ensure we clear the AI decision timeout to prevent double execution
     if (aiDecisionTimeout) {
       clearTimeout(aiDecisionTimeout);
@@ -3817,8 +4495,8 @@ function initGame() {
       console.warn('[AI DECISION] Error checking immediate bet response', e);
     }
 
-    // Choose AI thinking delay: faster during JUEGO declaration to match 2s pacing
-    const aiDelay = (gameState.currentRound === 'JUEGO' && gameState.juegoDeclarations) ? 1000 : 3000;
+    // Choose AI thinking delay: faster during JUEGO declaration to match 2s pacing (only when declarations pending)
+    const aiDelay = (gameState.currentRound === 'JUEGO' && gameState.juegoDeclarations && Object.keys(gameState.juegoDeclarations).length < 4) ? 1000 : 3000;
     aiDecisionTimeout = setTimeout(() => {
       console.log(`[AI DECISION] Executing - Player ${playerIndex + 1} deciding in ${gameState.currentRound}`);
       console.log(`[AI DECISION] Current state - activePlayerIndex: ${gameState.activePlayerIndex}, waitingForDiscard: ${gameState.waitingForDiscard}`);
@@ -3830,8 +4508,16 @@ function initGame() {
         return;
       }
 
-      // If we're in PARES declaration phase, AI should declare only when it's their turn
-      if (gameState.currentRound === 'PARES' && gameState.paresDeclarations) {
+      // If the timeout was already processed for this player (timer-based auto action), abort.
+      gameState.playerTimeoutConsumed = gameState.playerTimeoutConsumed || [false, false, false, false];
+      if (gameState.playerTimeoutConsumed[playerIndex]) {
+        console.log(`[AI_DECISION] Aborting - timeout already handled for player ${playerIndex + 1}`);
+        aiDecisionTimeout = null;
+        return;
+      }
+
+      // If we're in PARES declaration phase (still pending), AI should declare only when it's their turn
+      if (gameState.currentRound === 'PARES' && gameState.paresDeclarations && Object.keys(gameState.paresDeclarations).length < 4) {
         if (gameState.activePlayerIndex !== playerIndex) {
           console.log(`[AI DECISION] PARES declaration - not this player's turn (${playerIndex + 1}), skipping`);
           aiDecisionTimeout = null;
@@ -3860,7 +4546,7 @@ function initGame() {
       }
 
       // If we're in JUEGO declaration phase, AI should declare only when it's their turn
-      if (gameState.currentRound === 'JUEGO' && gameState.juegoDeclarations) {
+      if (gameState.currentRound === 'JUEGO' && gameState.juegoDeclarations && Object.keys(gameState.juegoDeclarations).length < 4) {
         if (gameState.activePlayerIndex !== playerIndex) {
           console.log(`[AI DECISION] JUEGO declaration - not this player's turn (${playerIndex + 1}), skipping`);
           aiDecisionTimeout = null;
@@ -4043,6 +4729,11 @@ function initGame() {
             toggleCardSelection(card);
           };
         }
+        // Debug: log discard UI assignment for each card
+        try {
+          console.log(`[SHOW DISCARD UI] player=${i + 1} cardIndex=${card.dataset.cardIndex || cardIndex} selectable=${card.classList.contains('selectable')} selected=${card.dataset.selected} onclick=${!!card.onclick}`);
+        } catch (e) { /* ignore */ }
+        
       });
     }
     
@@ -4052,13 +4743,21 @@ function initGame() {
   
   // Toggle card selection for discard with visual feedback
   function toggleCardSelection(card) {
-    const isSelected = card.dataset.selected === 'true';
+    // Ensure dataset.selected has a defined value
+    const isSelected = String(card.dataset.selected) === 'true';
     card.dataset.selected = isSelected ? 'false' : 'true';
-    
+
+    // Debug log to help identify cards that don't visually update
+    try {
+      console.log(`[TOGGLE SELECT] playerIndex=${card.dataset.playerIndex || 'unknown'} cardIndex=${card.dataset.cardIndex || 'unknown'} selected=${card.dataset.selected}`);
+    } catch (e) { /* ignore logging errors */ }
+
     if (isSelected) {
       // Deselect: remove gray overlay and X
       card.style.transform = 'translateY(0)';
       card.style.filter = '';
+      // Restore entanglement animation if it was paused
+      try { card.style.removeProperty('animation'); } catch (e) {}
       // Remove X overlay if it exists
       const overlay = card.querySelector('.discard-overlay');
       if (overlay) overlay.remove();
@@ -4066,7 +4765,12 @@ function initGame() {
       // Select: add gray overlay and X
       card.style.transform = 'translateY(-15px)';
       card.style.filter = 'grayscale(100%) brightness(0.3)';
-      
+
+      // If card is entangled and has glow animation, pause it so filter persists
+      if (card.classList.contains('entangled-card') || card.classList.contains('entangled-candidate')) {
+        try { card.style.setProperty('animation', 'none', 'important'); } catch (e) {}
+      }
+
       // Add X overlay
       let overlay = card.querySelector('.discard-overlay');
       if (!overlay) {
@@ -4237,6 +4941,9 @@ function initGame() {
               newCard.style.transition = '';
             }, 500);
           }, 50);
+
+          // Log hands after replacement so we can inspect bot/local cards and glow decisions
+          logHandsAndGlow();
         }
         
         // Clean up remaining cards and animate them appearing
@@ -4322,31 +5029,75 @@ function initGame() {
   }
 
   function matchEntangledCards() {
-    // Get entangled and superposed cards from player1 (my hand)
-    const player1Cards = document.querySelectorAll('#player1-zone .quantum-card');
-    const player1Entangled = new Set();
-    const player1Superposed = new Set();
-    
-    player1Cards.forEach(card => {
-      if (card.dataset.entangled === 'true') {
-        player1Entangled.add(card.dataset.partner);
-      }
-      if (card.dataset.superposed === 'true') {
-        player1Superposed.add(card.dataset.value2);
-      }
-    });
-    
-    if (player1Entangled.size === 0 && player1Superposed.size === 0) return;
-    
-    // Teammate is at player3 (index 2, top position)
+    // Prefer authoritative entanglement info from gameState if available
+    const localPlayer = typeof gameState.playerIndex === 'number' ? gameState.playerIndex : (window.currentLocalPlayerIndex ?? 0);
+    const teammate = getTeammate(localPlayer);
+
+    // Get server-provided per-player entanglement info (array of objects) when present
+    const localEntangled = gameState.entanglement.playerEntanglements[localPlayer] || [];
+
+    // If no authoritative info, fall back to legacy DOM value-based heuristic
+    if (!localEntangled || localEntangled.length === 0) {
+      // Legacy behavior: match by partner value (less precise)
+      const player1Cards = document.querySelectorAll('#player1-zone .quantum-card');
+      const player1Entangled = new Set();
+      player1Cards.forEach(card => {
+        if (card.dataset.entangled === 'true') player1Entangled.add(card.dataset.partner);
+      });
+      if (player1Entangled.size === 0) return;
+
+      const teammateCards = document.querySelectorAll('#player3-zone .quantum-card');
+      teammateCards.forEach(card => {
+        const mainValue = card.dataset.mainValue;
+        if (card.classList.contains('entangled-candidate')) {
+          if (mainValue && player1Entangled.has(mainValue)) {
+            card.classList.remove('entangled-candidate');
+            card.classList.add('entangled-card');
+            card.style.setProperty('--entangle-color', card.dataset.suitColor);
+          } else {
+            card.classList.remove('entangled-candidate');
+          }
+        }
+        if (card.classList.contains('superposed-candidate')) card.classList.remove('superposed-candidate');
+      });
+
+      return;
+    }
+
+    // Use authoritative mapping: find partner suit+value for local player's entangled cards that target teammate
+    const partnerTargets = localEntangled
+      .filter(e => (e.teammate_index === teammate) || (e.partner && e.partner.player === teammate) || (e.partner_player === teammate))
+      .map(e => {
+        // e may come from server (has .partner with suit/value) or from derived pairs (partner_card_index)
+        if (e.partner && typeof e.partner === 'object') {
+          return { value: e.partner.value || (e.partner.card && e.partner.card.value), suit: e.partner.suit || (e.partner.card && e.partner.card.suit) };
+        }
+        if (e.partner_card && typeof e.partner_card === 'object') {
+          return { value: e.partner_card.value, suit: e.partner_card.suit };
+        }
+        if (e.partner_card_index != null && Array.isArray(gameState.entanglement.pairs)) {
+          // Try to resolve via pairs list
+          const pair = gameState.entanglement.pairs.find(p => (p.cardA.card_index === e.card_index && p.cardA.player === localPlayer) || (p.cardB.card_index === e.card_index && p.cardB.player === localPlayer));
+          if (pair) {
+            const partner = pair.cardA.player === localPlayer ? pair.cardB : pair.cardA;
+            return { value: partner.value || partner.mainValue || (partner.card && partner.card.value), suit: partner.suit || (partner.card && partner.card.suit) };
+          }
+        }
+        // As a final fallback, use reported e.partner if it contains value
+        if (e.partner && e.partner.value) return { value: e.partner.value, suit: e.partner.suit };
+        return null;
+      }).filter(Boolean);
+
+    if (partnerTargets.length === 0) return;
+
     const teammateCards = document.querySelectorAll('#player3-zone .quantum-card');
-    
     teammateCards.forEach(card => {
-      const mainValue = card.dataset.mainValue;
-      
-      // Solo iluminar borde cuando está entrelazada con una mía (no superpuesta)
+      // Compare both value and suit when possible
+      const mainValue = card.dataset.mainValue || card.dataset.value;
+      const suit = card.dataset.suit;
+      const match = partnerTargets.find(pt => pt && pt.value && ((pt.value === mainValue) && (!pt.suit || pt.suit === suit)));
       if (card.classList.contains('entangled-candidate')) {
-        if (mainValue && player1Entangled.has(mainValue)) {
+        if (match) {
           card.classList.remove('entangled-candidate');
           card.classList.add('entangled-card');
           card.style.setProperty('--entangle-color', card.dataset.suitColor);
@@ -4354,11 +5105,11 @@ function initGame() {
           card.classList.remove('entangled-candidate');
         }
       }
-      
-      if (card.classList.contains('superposed-candidate')) {
-        card.classList.remove('superposed-candidate');
-      }
+      if (card.classList.contains('superposed-candidate')) card.classList.remove('superposed-candidate');
     });
+
+    // Log current hands & glow decisions for debugging
+    logHandsAndGlow();
   }
 
   function getCharacterColor(characterKey) {
@@ -4366,17 +5117,25 @@ function initGame() {
       'preskill': 'teal',
       'cirac': 'coral',
       'zoller': 'lavender',
-      'deutsch': 'gold'
+      'deutsch': 'gold',
+      'simmons': 'magenta',
+      'broadbent': 'green',
+      'martinis': 'orange',
+      'monroe': 'cadet'
     };
     return characterColors[characterKey] || 'teal';
   }
 
   function getCharacterColorValue(characterKey) {
     const characterColorValues = {
-      'preskill': '#2ec4b6',  // teal
-      'cirac': '#ff9e6d',     // coral
-      'zoller': '#a78bfa',    // lavender
-      'deutsch': '#f5c518'    // gold
+      'preskill': '#2ec4b6',      // teal
+      'cirac': '#ff9e6d',         // coral
+      'zoller': '#a78bfa',        // lavender
+      'deutsch': '#f5c518',       // gold
+      'simmons': '#ff66c4',       // magenta
+      'broadbent': '#2ecc71',     // green
+      'martinis': '#ffb347',      // orange
+      'monroe': '#5f9ea0'         // cadet blue
     };
     return characterColorValues[characterKey] || '#2ec4b6';
   }
@@ -4402,6 +5161,10 @@ function initGame() {
     card.className = `quantum-card card-${suit} card-dealing${isLateralPlayer ? ' card-lateral' : ''}${playerIndex === 3 ? ' card-left' : ''}`;
     card.dataset.dealOrder = String(playerIndex * 4 + index);
     card.dataset.suit = suit;  // Store suit for all cards
+    // Store logical index in hand (0-3) to allow reliable logging/matching
+    card.dataset.cardIndex = String(index);
+    // Store player index so selection and logging can reference owner reliably
+    card.dataset.playerIndex = String(playerIndex);
     
     const rotation = (Math.random() - 0.5) * 6;
     // Rotar cartas de jugadores laterales (2 y 4 = índices 1 y 3)
@@ -5109,16 +5872,19 @@ function initGame() {
     };
     
     const notification = document.createElement('div');
+    // Determine character color for this player
+    const charKey = (gameState.playerCharacters && gameState.playerCharacters[playerIndex]) || null;
+    const charColor = charKey ? getCharacterColorValue(charKey) : '#2ec4b6';
     notification.style.cssText = `
       position: fixed;
       top: 20px;
       left: 50%;
       transform: translateX(-50%);
       background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
-      border: 2px solid #2ec4b6;
+      border: 2px solid ${charColor};
       border-radius: 15px;
       padding: 15px 30px;
-      color: #2ec4b6;
+      color: ${charColor};
       font-size: 1.2rem;
       font-weight: bold;
       z-index: 2000;
@@ -5126,10 +5892,11 @@ function initGame() {
       opacity: 0;
       transition: opacity 0.3s;
     `;
-    
+
     // Use playerActualNames if available, fallback to character names
     const playerName = (gameState.playerActualNames && gameState.playerActualNames[playerIndex]) || gameState.playerNames[playerIndex] || `Player ${playerIndex + 1}`;
-    notification.textContent = `${playerName}: ${actionTexts[action] || action.toUpperCase()}`;
+    const actionText = actionTexts[action] || action.toUpperCase();
+    notification.innerHTML = `<span style="color:${charColor};font-weight:700">${playerName}</span>: <span style="color:var(--paper-cream)">${actionText}</span>`;
     document.body.appendChild(notification);
     
     // Fade in
@@ -5318,7 +6085,7 @@ function initGame() {
     }
   }
 
-  function showCharacterModal(characterName, description) {
+  function showCharacterModal(characterName, description, color = '#2ec4b6') {
     // Remove existing modal if any
     const existingModal = document.querySelector('.character-modal');
     if (existingModal) existingModal.remove();
@@ -5326,13 +6093,13 @@ function initGame() {
     const modal = document.createElement('div');
     modal.className = 'character-modal';
     modal.innerHTML = `
-      <div class="character-modal-content">
+      <div class="character-modal-content" style="border-top: 6px solid ${color};">
         <div class="character-modal-header">
-          <h2>${characterName}</h2>
-          <button class="character-modal-close">✕</button>
+          <h2 style="color: ${color}; margin:0;">${characterName}</h2>
+          <button class="character-modal-close" style="border:1px solid ${color};">✕</button>
         </div>
         <div class="character-modal-body">
-          <p>${description}</p>
+          <p style="color: ${color};">${description}</p>
         </div>
       </div>
     `;
@@ -5941,15 +6708,37 @@ function initGame() {
     const predictionWrong = (declaration === true && !actuallyHas) || (declaration === false && actuallyHas);
 
     if (predictionWrong) {
-      // Apply -1 point penalty and show notification (UI copied from insp.js)
+      // Penalty: JUEGO predictions are worth 2 points, others 1
+      const penalty = (roundName === 'JUEGO') ? 2 : 1;
       const playerTeam = getPlayerTeam(playerIndex);
-      gameState.teams[playerTeam].score -= 1;
-      console.log(`Player ${playerIndex + 1} incurred -1 penalty for wrong ${roundName} prediction`);
+      gameState.teams[playerTeam].score -= penalty;
+      console.log(`Player ${playerIndex + 1} incurred -${penalty} penalty for wrong ${roundName} prediction`);
       // Show visual penalty notification
       if (typeof showPenaltyNotification === 'function') {
-        try { showPenaltyNotification(playerIndex, roundName, 1); } catch (e) { console.warn('showPenaltyNotification failed', e); }
+        try { showPenaltyNotification(playerIndex, roundName, penalty); } catch (e) { console.warn('showPenaltyNotification failed', e); }
       }
       updateScoreboard();
+      // Adjust declaration state for PARES according to rules:
+      // - If player declared NO TENGO (false) but actually had PARES, they are penalized
+      //   but should still be allowed to participate in the PARES betting round.
+      // - If player declared TENGO (true) but actually did not have PARES, they are
+      //   penalized and should NOT participate in the PARES betting round.
+      try {
+        if (roundName === 'PARES' && gameState.paresDeclarations) {
+          const orig = gameState.paresDeclarations[playerIndex];
+          if ((orig === false) && actuallyHas) {
+            // Mark as post-penalty tengo so eligibility/counting treats them as having pares
+            gameState.paresDeclarations[playerIndex] = 'tengo_after_penalty';
+            console.log(`[PARES PENALTY] Player ${playerIndex + 1} was NO TENGO but had PARES; applied penalty and marked as 'tengo_after_penalty'`);
+          } else if ((orig === true) && !actuallyHas) {
+            // Mark as no tengo so they won't participate further
+            gameState.paresDeclarations[playerIndex] = false;
+            console.log(`[PARES PENALTY] Player ${playerIndex + 1} declared TENGO but had no PARES; applied penalty and marked as NO TENGO`);
+          }
+        }
+      } catch (e) {
+        console.warn('[checkPredictionPenalty] failed to adjust pares declaration after penalty', e);
+      }
     }
   }
   

@@ -229,14 +229,33 @@ class CardGenerator {
               stroke-width="1.2" opacity="0.6"/>
         
         <!-- Friendly expression -->
-        <path d="M30,38" fill="none" stroke="#a78bfa" stroke-width="2" 
-              stroke-linecap="round" opacity="0.7"/>
-        <path d="M50,38" fill="none" stroke="#a78bfa" stroke-width="2" 
+        <path d="M30,38 Q40,44 50,38" 
+              fill="none" stroke="#a78bfa" stroke-width="2" 
               stroke-linecap="round" opacity="0.7"/>
         
         <!-- Eyes -->
         <circle cx="30" cy="28" r="2.5" fill="#a78bfa" opacity="0.8"/>
         <circle cx="50" cy="28" r="2.5" fill="#a78bfa" opacity="0.8"/>
+      </svg>`,
+      
+      'martinis': `<svg width="80" height="100" viewBox="0 0 80 100" xmlns="http://www.w3.org/2000/svg">
+        <!-- Head -->
+        <circle cx="40" cy="30" r="20" fill="none" stroke="#ffb347" stroke-width="2.5" opacity="0.85"/>
+        <!-- Wavy hair -->
+        <path d="M22,16 Q30,10 40,13 Q50,10 58,16" fill="none" stroke="#ffb347" stroke-width="2" opacity="0.75"/>
+        <path d="M24,18 Q35,13 40,15 Q45,13 56,18" fill="none" stroke="#ffb347" stroke-width="1.5" opacity="0.6"/>
+        <!-- Body -->
+        <path d="M20,52 Q40,70 60,52 L60,90 Q40,100 20,90 Z" fill="none" stroke="#ffb347" stroke-width="2.5" opacity="0.85"/>
+        <!-- Quantum lattice symbol (unique) -->
+        <circle cx="32" cy="73" r="4" fill="none" stroke="#ffb347" stroke-width="1.5" opacity="0.7"/>
+        <circle cx="40" cy="73" r="4" fill="none" stroke="#ffb347" stroke-width="1.5" opacity="0.7"/>
+        <circle cx="48" cy="73" r="4" fill="none" stroke="#ffb347" stroke-width="1.5" opacity="0.7"/>
+        <line x1="32" y1="73" x2="48" y2="73" stroke="#ffb347" stroke-width="1.2" opacity="0.6"/>
+        <!-- Friendly expression -->
+        <path d="M30,38 Q40,44 50,38" fill="none" stroke="#ffb347" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+        <!-- Eyes -->
+        <circle cx="30" cy="28" r="2.5" fill="#ffb347" opacity="0.8"/>
+        <circle cx="50" cy="28" r="2.5" fill="#ffb347" opacity="0.8"/>
       </svg>`,
       
       'Deutsch': `<svg width="80" height="100" viewBox="0 0 80 100" xmlns="http://www.w3.org/2000/svg">
@@ -272,6 +291,127 @@ class CardGenerator {
         <!-- Eyes -->
         <circle cx="31" cy="28" r="2.5" fill="#f5c518" opacity="0.8"/>
         <circle cx="49" cy="28" r="2.5" fill="#f5c518" opacity="0.8"/>
+      </svg>`,
+      
+      'Simmons': `<svg width="80" height="100" viewBox="0 0 80 100" xmlns="http://www.w3.org/2000/svg">
+        <!-- Head -->
+        <circle cx="40" cy="30" r="20" 
+                fill="none" stroke="#ff66c4" stroke-width="2.5" opacity="0.85"/>
+        
+        <!-- Professional hair -->
+        <path d="M22,18 Q40,10 58,18" 
+              fill="none" stroke="#ff66c4" stroke-width="2" opacity="0.7"/>
+        <path d="M24,16 Q40,8 56,16" 
+              fill="none" stroke="#ff66c4" stroke-width="1.5" opacity="0.6"/>
+        
+        <!-- Body with lab coat -->
+        <path d="M20,52 Q40,70 60,52 L60,90 Q40,100 20,90 Z" 
+              fill="none" stroke="#ff66c4" stroke-width="2.5" opacity="0.85"/>
+        
+        <!-- Lab coat buttons -->
+        <circle cx="40" cy="60" r="2" fill="#ff66c4" opacity="0.7"/>
+        <circle cx="40" cy="72" r="2" fill="#ff66c4" opacity="0.7"/>
+        <circle cx="40" cy="84" r="2" fill="#ff66c4" opacity="0.7"/>
+        
+        <!-- Atomic symbol (single atom) -->
+        <circle cx="40" cy="73" r="6" fill="none" stroke="#ff66c4" 
+                stroke-width="1.5" opacity="0.7"/>
+        <circle cx="40" cy="73" r="2" fill="#ff66c4" opacity="0.8"/>
+        
+        <!-- Eyes -->
+        <circle cx="30" cy="28" r="2.5" fill="#ff66c4" opacity="0.8"/>
+        <circle cx="50" cy="28" r="2.5" fill="#ff66c4" opacity="0.8"/>
+      </svg>`,
+      
+      'Broadbent': `<svg width="80" height="100" viewBox="0 0 80 100" xmlns="http://www.w3.org/2000/svg">
+        <!-- Head -->
+        <circle cx="40" cy="30" r="20" 
+                fill="none" stroke="#2ecc71" stroke-width="2.5" opacity="0.85"/>
+        
+        <!-- Hair with highlights -->
+        <path d="M22,17 Q40,9 58,17" 
+              fill="none" stroke="#2ecc71" stroke-width="2" opacity="0.75"/>
+        <path d="M25,15 Q40,10 55,15" 
+              fill="none" stroke="#2ecc71" stroke-width="1.5" opacity="0.6"/>
+        
+        <!-- Body -->
+        <path d="M20,52 Q40,70 60,52 L60,90 Q40,100 20,90 Z" 
+              fill="none" stroke="#2ecc71" stroke-width="2.5" opacity="0.85"/>
+        
+        <!-- Security/cryptography symbol (padlock) -->
+        <rect x="33" y="68" width="14" height="12" rx="1" 
+              fill="none" stroke="#2ecc71" stroke-width="1.5" opacity="0.7"/>
+        <path d="M36,68 Q36,62 40,62 Q44,62 44,68" 
+              fill="none" stroke="#2ecc71" stroke-width="1.5" opacity="0.7"/>
+        <circle cx="40" cy="77" r="1.5" fill="#2ecc71" opacity="0.8"/>
+        
+        <!-- Eyes -->
+        <circle cx="30" cy="28" r="2.5" fill="#2ecc71" opacity="0.8"/>
+        <circle cx="50" cy="28" r="2.5" fill="#2ecc71" opacity="0.8"/>
+      </svg>`,
+      
+      'Yunger Halpern': `<svg width="80" height="100" viewBox="0 0 80 100" xmlns="http://www.w3.org/2000/svg">
+        <!-- Head -->
+        <circle cx="40" cy="30" r="20" 
+                fill="none" stroke="#ffb347" stroke-width="2.5" opacity="0.85"/>
+        
+        <!-- Wavy hair -->
+        <path d="M22,16 Q30,10 40,13 Q50,10 58,16" 
+              fill="none" stroke="#ffb347" stroke-width="2" opacity="0.75"/>
+        <path d="M24,18 Q35,13 40,15 Q45,13 56,18" 
+              fill="none" stroke="#ffb347" stroke-width="1.5" opacity="0.6"/>
+        
+        <!-- Body -->
+        <path d="M20,52 Q40,70 60,52 L60,90 Q40,100 20,90 Z" 
+              fill="none" stroke="#ffb347" stroke-width="2.5" opacity="0.85"/>
+        
+        <!-- Steampunk gear symbol -->
+        <circle cx="40" cy="73" r="6" fill="none" stroke="#ffb347" 
+                stroke-width="1.5" opacity="0.7"/>
+        <circle cx="40" cy="73" r="3" fill="none" stroke="#ffb347" 
+                stroke-width="1" opacity="0.6"/>
+        <circle cx="40" cy="73" r="1" fill="#ffb347" opacity="0.8"/>
+        <circle cx="47" cy="73" r="1.5" fill="#ffb347" opacity="0.7"/>
+        <circle cx="33" cy="73" r="1.5" fill="#ffb347" opacity="0.7"/>
+        
+        <!-- Eyes -->
+        <circle cx="30" cy="28" r="2.5" fill="#ffb347" opacity="0.8"/>
+        <circle cx="50" cy="28" r="2.5" fill="#ffb347" opacity="0.8"/>
+      </svg>`,
+      
+      'Hallberg': `<svg width="80" height="100" viewBox="0 0 80 100" xmlns="http://www.w3.org/2000/svg">
+        <!-- Head -->
+        <circle cx="40" cy="30" r="20" 
+                fill="none" stroke="#5f9ea0" stroke-width="2.5" opacity="0.85"/>
+        
+        <!-- Elegant hair -->
+        <path d="M21,17 Q30,9 40,12 Q50,9 59,17" 
+              fill="none" stroke="#5f9ea0" stroke-width="2" opacity="0.75"/>
+        <path d="M24,15 Q40,8 56,15" 
+              fill="none" stroke="#5f9ea0" stroke-width="1.5" opacity="0.6"/>
+        
+        <!-- Body -->
+        <path d="M20,52 Q40,70 60,52 L60,90 Q40,100 20,90 Z" 
+              fill="none" stroke="#5f9ea0" stroke-width="2.5" opacity="0.85"/>
+        
+        <!-- Molecular/material structure symbol (atoms linked) -->
+        <circle cx="32" cy="70" r="3" fill="none" stroke="#5f9ea0" 
+                stroke-width="1.5" opacity="0.7"/>
+        <circle cx="40" cy="70" r="3" fill="none" stroke="#5f9ea0" 
+                stroke-width="1.5" opacity="0.7"/>
+        <circle cx="48" cy="70" r="3" fill="none" stroke="#5f9ea0" 
+                stroke-width="1.5" opacity="0.7"/>
+        <line x1="35" y1="70" x2="37" y2="70" stroke="#5f9ea0" 
+              stroke-width="1" opacity="0.6"/>
+        <line x1="43" y1="70" x2="45" y2="70" stroke="#5f9ea0" 
+              stroke-width="1" opacity="0.6"/>
+        <circle cx="32" cy="70" r="1" fill="#5f9ea0" opacity="0.8"/>
+        <circle cx="40" cy="70" r="1" fill="#5f9ea0" opacity="0.8"/>
+        <circle cx="48" cy="70" r="1" fill="#5f9ea0" opacity="0.8"/>
+        
+        <!-- Eyes -->
+        <circle cx="30" cy="28" r="2.5" fill="#5f9ea0" opacity="0.8"/>
+        <circle cx="50" cy="28" r="2.5" fill="#5f9ea0" opacity="0.8"/>
       </svg>`
     };
     

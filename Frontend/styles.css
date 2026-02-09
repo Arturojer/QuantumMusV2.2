@@ -708,6 +708,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
 }
 
 .character-info {
@@ -776,6 +777,47 @@
   padding: 4px 10px;
   border-radius: 8px;
   z-index: 2;
+}
+
+/* Character-specific portrait styles for lobby */
+.character-id-preskill .character-portrait-wrapper {
+  border: 3px solid #2ec4b6;
+  border-radius: 8px;
+}
+
+.character-id-zoller .character-portrait-wrapper {
+  border: 3px solid #a78bfa;
+  border-radius: 8px;
+}
+
+.character-id-cirac .character-portrait-wrapper {
+  border: 3px solid #ff9e6d;
+  border-radius: 8px;
+}
+
+.character-id-deutsch .character-portrait-wrapper {
+  border: 3px solid #f5c518;
+  border-radius: 8px;
+}
+
+.character-id-simmons .character-portrait-wrapper {
+  border: 3px solid #ff66c4;
+  border-radius: 8px;
+}
+
+.character-id-broadbent .character-portrait-wrapper {
+  border: 3px solid #2ecc71;
+  border-radius: 8px;
+}
+
+.character-id-martinis .character-portrait-wrapper {
+  border: 3px solid #ffb347;
+  border-radius: 8px;
+}
+
+.character-id-monroe .character-portrait-wrapper {
+  border: 3px solid #5f9ea0;
+  border-radius: 8px;
 }
 
 .game-settings {
@@ -988,6 +1030,34 @@
   background: rgba(100, 116, 139, 0.2);
 }
 
+.lobby-buttons {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+}
+
+.lobby-back-btn {
+  flex: 1;
+  padding: 12px;
+  font-size: 0.9rem;
+  background: transparent;
+  border: 2px solid var(--quantum-teal);
+  color: var(--quantum-teal);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s;
+  font-weight: bold;
+}
+
+.lobby-back-btn:hover {
+  background: rgba(46, 196, 182, 0.2);
+  border-color: var(--quantum-teal);
+}
+
+.lobby-leave-btn {
+  flex: 1;
+}
+
 .lobby-demo-btn {
   width: 100%;
   padding: 10px;
@@ -1193,6 +1263,10 @@
   --quantum-lavender: #a78bfa;
   --quantum-gold: #f5c518;
   --quantum-indigo: #4338ca;
+  --quantum-magenta: #ff66c4;
+  --quantum-green: #2ecc71;
+  --quantum-orange: #ffb347;
+  --quantum-cadet: #5f9ea0;
   --paper-cream: #fffef9;
   --paper-beige: #f8f4e8;
   --card-shadow: #2d1810;
@@ -1444,6 +1518,26 @@ body::after {
 .character-avatar.deutsch {
   border-color: var(--quantum-gold);
   box-shadow: 0 10px 30px rgba(245, 197, 24, 0.3);
+}
+
+.character-avatar.simmons {
+  border-color: var(--quantum-magenta);
+  box-shadow: 0 10px 30px rgba(255, 102, 196, 0.3);
+}
+
+.character-avatar.broadbent {
+  border-color: var(--quantum-green);
+  box-shadow: 0 10px 30px rgba(46, 204, 113, 0.3);
+}
+
+.character-avatar.martinis {
+  border-color: var(--quantum-orange);
+  box-shadow: 0 10px 30px rgba(255, 179, 71, 0.3);
+}
+
+.character-avatar.monroe {
+  border-color: var(--quantum-cadet);
+  box-shadow: 0 10px 30px rgba(95, 158, 160, 0.3);
 }
 
 .character-portrait {

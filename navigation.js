@@ -109,16 +109,20 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function mapRoomPlayersToLocal(roomPlayers, amHost) {
-    return roomPlayers.map((p, i) => {
-      const char = characters.find(c => c.id === (p.character || ''));
-      return {
-        name: p.name,
-        character: p.character || null,
-        team: char ? char.team : null,
-        isReady: !!p.character,
-        isHost: i === 0
-      };
-    });
+    // Only allow valid characters (including new women)
+    const validCharacterIds = characters.map(c => c.id);
+    return roomPlayers
+      .filter(p => validCharacterIds.includes(p.character))
+      .map((p, i) => {
+        const char = characters.find(c => c.id === (p.character || ''));
+        return {
+          name: p.name,
+          character: p.character || null,
+          team: char ? char.team : null,
+          isReady: !!p.character,
+          isHost: i === 0
+        };
+      });
   }
 
   function emitCreateRoom() {
@@ -158,6 +162,8 @@ document.addEventListener('DOMContentLoaded', () => {
         room_id: gameState.roomId,
         character: charId
       });
+      // Force update of character grid to show 'Elegido' immediately
+      setTimeout(() => { createCharacterSelection(); }, 100);
     }
   }
 
@@ -196,6 +202,42 @@ document.addEventListener('DOMContentLoaded', () => {
       team: 2
     }
   ];
+
+  // Additional characters (female scientists) available in lobby
+  characters.push({
+    id: 'simmons',
+    name: 'Simmons',
+    color: '#ff66c4',
+    specialty: 'Fabricación a escala atómica',
+    description: 'Líder en la fabricación de hardware cuántico en silicio',
+    team: 2
+  });
+  characters.push({
+    id: 'broadbent',
+    name: 'Broadbent',
+    color: '#2ecc71',
+    specialty: 'Fundamentos de la seguridad cuántica',
+    description: 'Investigadora en teoría de la computación y criptografía cuántica',
+    team: 1
+  });
+  // Substitute Wiesner and Benioff with important women in quantum computing
+  // Substitutes: Women leaders in quantum computing
+  characters.push({
+    id: 'martinis',
+    name: 'Nicole Yunger Halpern',
+    color: '#ffb347', // orange
+    specialty: 'Teoría de la información cuántica',
+    description: 'Nicole Yunger Halpern: Física teórica y divulgadora, pionera en termodinámica cuántica y autora de "Quantum Steampunk". Su trabajo conecta la información cuántica con la física clásica y la computación.',
+    team: 1
+  });
+  characters.push({
+    id: 'monroe',
+    name: 'Karen Hallberg',
+    color: '#5f9ea0', // cadet blue
+    specialty: 'Óptica cuántica y computación',
+    description: 'Karen Hallberg: Física argentina reconocida internacionalmente por sus contribuciones a la materia condensada y la computación cuántica. Defensora de la participación de mujeres en la ciencia.',
+    team: 2
+  });
 
   // Screen management
   const screens = {
@@ -637,9 +679,20 @@ document.addEventListener('DOMContentLoaded', () => {
       .filter(p => p.name !== gameState.playerName && p.character)
       .map(p => p.character);
 
+    // Count how many players already selected characters from each team
+    const teamCounts = { 1: 0, 2: 0 };
+    gameState.players.forEach(p => {
+      if (p.team === 1) teamCounts[1]++;
+      if (p.team === 2) teamCounts[2]++;
+    });
+
     characters.forEach(char => {
-      const isTaken = takenByOthers.includes(char.id);
-      const isMySelection = gameState.selectedCharacter && gameState.selectedCharacter.id === char.id;
+      // Determine if this character is the current player's selection.
+      const sel = gameState.selectedCharacter;
+      const isMySelection = sel && (typeof sel === 'string' ? sel === char.id : (sel.id === char.id));
+      // Mark as taken if character already chosen by others or the team
+      // already has 2 players selected (prevent choosing >2 from same team).
+      const isTaken = takenByOthers.includes(char.id) || (teamCounts[char.team] >= 2 && !isMySelection && !takenByOthers.includes(char.id));
 
       const charCard = document.createElement('div');
       charCard.className = 'character-card' + (isTaken ? ' taken' : '') + (isMySelection ? ' selected' : '');
@@ -685,6 +738,15 @@ document.addEventListener('DOMContentLoaded', () => {
       .filter(p => p.name !== gameState.playerName && p.character)
       .map(p => p.character);
     if (takenByOthers.includes(character.id)) return;
+
+    // Prevent selecting a character from a team that already has two players
+    const teamCounts = { 1: 0, 2: 0 };
+    gameState.players.forEach(p => { if (p.team === 1) teamCounts[1]++; if (p.team === 2) teamCounts[2]++; });
+    if (teamCounts[character.team] >= 2) {
+      // Do not allow selection; silently ignore or show brief feedback
+      alert('No se pueden elegir más jugadores de ese equipo.');
+      return;
+    }
 
     document.querySelectorAll('.character-card').forEach(card => {
       card.classList.remove('selected');
@@ -737,9 +799,9 @@ document.addEventListener('DOMContentLoaded', () => {
       if (player.character) {
         const char = characters.find(c => c.id === player.character);
         playerItem.innerHTML = `
-          <div class="player-avatar" style="border-color: ${char.color}">
-            ${CardGenerator.generateCharacter(char.name)}
-          </div>
+            <div class="player-avatar" style="border-color: ${char.color}">
+              ${CardGenerator.generateCharacter(char.name)}
+            </div>
           <div class="player-info">
             <span class="player-name">${player.name}</span>
             ${player.isHost ? '<span class="host-badge">HOST</span>' : ''}
@@ -834,7 +896,21 @@ document.addEventListener('DOMContentLoaded', () => {
     window.onlineMode = true;
     window.roomId = gameState.roomId;
     window.initialServerState = detail.game_state || {};
+    console.log('[ONLINE] onlineGameStarted event received:', {
+      gameMode: window.currentGameMode,
+      players: window.currentPlayers,
+      localIndex,
+      roomId: window.roomId,
+      initialServerState: window.initialServerState
+    });
     showScreen('game');
+    setTimeout(() => {
+      const gameScreen = document.getElementById('game-screen');
+      if (!gameScreen.classList.contains('active')) {
+        alert('Error: No se pudo avanzar a la pantalla de juego. Por favor, recarga la página o revisa la consola para más detalles.');
+        console.error('[ONLINE] Error: game-screen did not become active after onlineGameStarted.');
+      }
+    }, 1000);
   });
 
   // ============================================================

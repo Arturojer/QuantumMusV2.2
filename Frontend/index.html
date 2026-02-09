@@ -132,7 +132,10 @@
           <div id="players-list" class="players-list"></div>
           <button id="start-game-button" class="lobby-start-btn" style="display:none">INICIAR PARTIDA</button>
           <button id="demo-players-button" class="lobby-demo-btn" style="display:none">Demo: añadir jugadores de prueba</button>
-          <button id="leave-lobby-button" class="lobby-leave-btn">Salir</button>
+          <div class="lobby-buttons">
+            <button id="back-to-menu-button" class="lobby-back-btn">← Atrás</button>
+            <button id="leave-lobby-button" class="lobby-leave-btn">Salir</button>
+          </div>
         </div>
       </div>
     </div>
@@ -166,6 +169,7 @@
     </div>
   </div>
 
+  <script src="/socket.io/socket.io.js" defer></script>
   <script src="assets/generate-cards.js" defer></script>
   <script src="navigation.js" defer></script>
   <script src="game.js" defer></script>
