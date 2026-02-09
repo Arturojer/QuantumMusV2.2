@@ -28,10 +28,15 @@ def _get_cors_origins():
     allowed = os.environ.get('ALLOWED_ORIGINS', '').strip()
     frontend_url = os.environ.get('FRONTEND_URL', '').strip()
     frontend_origin = os.environ.get('FRONTEND_ORIGIN', '').strip()
+    local_origins = [
+        'https://quantum-mus-backend.onrender.com'
+    ]
 
     if allowed:
         # Usar lista explícita si se proporciona
-        return [o.strip() for o in allowed.split(',') if o.strip()]
+        origins = [o.strip() for o in allowed.split(',') if o.strip()]
+        origins.extend(local_origins)
+        return origins
 
     extra_origins = [o for o in [frontend_url, frontend_origin] if o]
 
@@ -43,6 +48,7 @@ def _get_cors_origins():
         if render_domain:
             origins.extend([f'https://{render_domain}', f'https://www.{render_domain}'])
         origins.extend(extra_origins)
+        origins.extend(local_origins)
         if origins:
             return origins
         # Fallback seguro si no hay dominio configurado

@@ -23,7 +23,7 @@ pip install -r requirements.txt --quiet
 echo.
 
 REM Run server
-echo Starting server on http://localhost:5000
+echo Starting server on https://quantum-mus-backend.onrender.com/
 echo Press Ctrl+C to stop
 echo.
 python server.py
