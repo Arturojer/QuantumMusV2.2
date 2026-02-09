@@ -83,10 +83,6 @@ Toda la conexión al backend (WebSocket y API) usa una **configuración centrali
 
 Así puedes subir el proyecto a internet y cambiar la dirección del servidor en un solo sitio sin tocar el resto del código.
 
-## GitHub Pages
-
-- En [frontend/index.html](frontend/index.html) ya esta configurado `base` con `/QuantumMusV2.2/`.
-- Si cambias el nombre del repo, actualiza el `base` y los enlaces de pruebas.
 
 ## Códigos de sala
 
