@@ -18,8 +18,8 @@ try:
 except Exception:
     eventlet = None
 
-# Directorio del frontend (padre del backend) para servir archivos estáticos
-FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+# Directorio del frontend (para servir archivos estáticos si aplica)
+FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'frontend'))
 
 # CORS: orígenes permitidos
 # En producción (Render), especificar ALLOWED_ORIGINS con dominios explícitos
