@@ -24,7 +24,7 @@ pip install -r requirements.txt
 python server.py
 ```
 
-The server will start on `http://localhost:5000`
+The server will start on the configured host/port. Set `HOST` and `PORT` as needed.
 
 ## API Endpoints
 
@@ -138,7 +138,8 @@ The server will auto-reload on code changes.
 
 Test WebSocket connection:
 ```javascript
-const socket = io('http://localhost:5000');
+const backendUrl = window.QUANTUM_MUS_SERVER_URL || 'https://quantum-mus-backend.onrender.com';
+const socket = io(backendUrl);
 
 socket.on('connect', () => {
   console.log('Connected!');

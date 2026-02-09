@@ -5,7 +5,7 @@
 El juego está preparado para funcionar online. Se han realizado las siguientes modificaciones:
 
 ### Frontend
-- **config.js** + **config.override.js**: URL del servidor centralizada. Por defecto usa el mismo origen que la página (localhost o tu dominio). Para producción con backend en otra URL, edita solo `config.override.js` (ver más abajo).
+- **config.js** + **config.override.js**: URL del servidor centralizada. Por defecto usa el mismo origen que la página (entorno local o tu dominio). Para producción con backend en otra URL, edita solo `config.override.js` (ver más abajo).
 - **Socket.IO**: Integrado para comunicación en tiempo real
 - **Navegación**: Crear/unir salas, lobby con jugadores en tiempo real, selección de personaje
 - **Juego**: Sincronización de estado y acciones con el servidor
@@ -29,7 +29,7 @@ El juego está preparado para funcionar online. Se han realizado las siguientes 
    python server.py
    ```
 
-3. **Abrir en el navegador:** `http://localhost:5000`
+3. **Abrir en el navegador:** usa la URL que indique tu servidor local.
 
 El servidor sirve tanto el frontend como el backend. No es necesario un servidor separado para los archivos estáticos.
 
@@ -70,7 +70,7 @@ gunicorn --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker -
 
 ## Cambiar la URL del servidor (frontend → backend)
 
-Toda la conexión al backend (WebSocket y API) usa una **configuración centralizada**. No hay URLs tipo `localhost` repartidas por el código.
+Toda la conexión al backend (WebSocket y API) usa una **configuración centralizada**. No hay URLs del servidor hardcodeadas repartidas por el código.
 
 - **Mismo dominio (recomendado):** Si sirves el frontend y el backend desde el mismo dominio (p. ej. `https://midominio.com` para la web y `https://midominio.com` para el API), no hace falta cambiar nada. El cliente usa `window.location.origin` automáticamente.
 - **Backend en otra URL:** Edita **solo** el archivo `config.override.js` en la raíz del proyecto:
@@ -82,6 +82,11 @@ Toda la conexión al backend (WebSocket y API) usa una **configuración centrali
   3. Asegura CORS en el backend para ese origen (frontend).
 
 Así puedes subir el proyecto a internet y cambiar la dirección del servidor en un solo sitio sin tocar el resto del código.
+
+## GitHub Pages
+
+- En [frontend/index.html](frontend/index.html) ya esta configurado `base` con `/QuantumMusV2.2/`.
+- Si cambias el nombre del repo, actualiza el `base` y los enlaces de pruebas.
 
 ## Códigos de sala
 

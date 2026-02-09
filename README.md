@@ -40,7 +40,12 @@ npx serve .
 # o: python -m http.server 8000
 ```
 
-Luego entra en `http://localhost:3000` (o el puerto que indique).
+Luego entra en la URL que indique el servidor local (o el puerto que indique).
+
+### GitHub Pages
+
+- Sitio: https://arturojer.github.io/QuantumMusV2.2/
+- Test de conexion: https://arturojer.github.io/QuantumMusV2.2/ws-test.html
 
 ### Con backend (opcional)
 

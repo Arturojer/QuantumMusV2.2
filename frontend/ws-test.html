@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quantum Mus - Socket Test</title>
+  <base href="/QuantumMusV2.2/">
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <script src="config.override.js"></script>
+  <script src="config.js"></script>
+  <style>
+    body {
+      font-family: "Courier New", Courier, monospace;
+      background: #0e1a24;
+      color: #e6f2ff;
+      padding: 24px;
+    }
+    .panel {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      padding: 16px;
+      max-width: 700px;
+    }
+    button {
+      background: #2ec4b6;
+      border: none;
+      color: #0b131a;
+      padding: 10px 16px;
+      border-radius: 6px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-right: 8px;
+    }
+    button.secondary {
+      background: #ffbf69;
+    }
+    pre {
+      background: #0b131a;
+      color: #b9e4ff;
+      padding: 12px;
+      border-radius: 6px;
+      overflow: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h1>Socket.IO Test</h1>
+    <p>Backend URL: <span id="backend-url">(loading)</span></p>
+    <div>
+      <button id="connect-btn">Connect</button>
+      <button id="health-btn" class="secondary">GET /health</button>
+    </div>
+    <pre id="log"></pre>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+      var logEl = document.getElementById('log');
+      var backendEl = document.getElementById('backend-url');
+      var backendUrl = (window.QuantumMusConfig && window.QuantumMusConfig.getServerUrl)
+        ? window.QuantumMusConfig.getServerUrl()
+        : (window.QUANTUM_MUS_SERVER_URL || 'https://quantum-mus-backend.onrender.com');
+      backendEl.textContent = backendUrl || '(empty)';
+
+      function log(msg) {
+        logEl.textContent += msg + '\n';
+      }
+
+      document.getElementById('connect-btn').addEventListener('click', function () {
+        if (!window.io) {
+          log('Socket.IO client not loaded.');
+          return;
+        }
+        if (!backendUrl) {
+          log('Backend URL is empty.');
+          return;
+        }
+        var socket = io(backendUrl, { transports: ['websocket', 'polling'], reconnection: true });
+        socket.on('connect', function () {
+          log('Connected: ' + socket.id);
+          socket.disconnect();
+          log('Disconnected after test.');
+        });
+        socket.on('connect_error', function (err) {
+          log('Connect error: ' + (err && err.message ? err.message : String(err)));
+        });
+      });
+
+      document.getElementById('health-btn').addEventListener('click', function () {
+        if (!backendUrl) {
+          log('Backend URL is empty.');
+          return;
+        }
+        fetch(backendUrl.replace(/\/$/, '') + '/health')
+          .then(function (res) { return res.json(); })
+          .then(function (data) { log('Health: ' + JSON.stringify(data)); })
+          .catch(function (err) { log('Health error: ' + err); });
+      });
+    })();
+  </script>
+</body>
+</html>

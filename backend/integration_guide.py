@@ -15,7 +15,8 @@ INTEGRATION_CODE = """
 // <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 
 // 2. Connect to backend
-const socket = io('http://localhost:5000');
+const backendUrl = (window.QUANTUM_MUS_SERVER_URL || 'https://quantum-mus-backend.onrender.com');
+const socket = io(backendUrl);
 
 // Store game state
 let gameState = {

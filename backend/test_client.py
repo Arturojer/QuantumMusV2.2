@@ -6,6 +6,7 @@ Demonstrates WebSocket connection and game flow
 import socketio
 import time
 import json
+import os
 
 # Create a Socket.IO client
 sio = socketio.Client()
@@ -176,8 +177,9 @@ def main():
     
     # Connect to server
     print('\n--- Connecting to Server ---')
+    server_url = os.environ.get('QUANTUM_MUS_SERVER_URL', 'https://quantum-mus-backend.onrender.com')
     try:
-        sio.connect('http://localhost:5000')
+        sio.connect(server_url)
     except Exception as e:
         print(f'✗ Failed to connect: {e}')
         return

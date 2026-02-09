@@ -46,7 +46,7 @@ def _get_cors_origins():
         if origins:
             return origins
         # Fallback seguro si no hay dominio configurado
-        return ['https://localhost']
+        return ['https://quantum-mus-backend.onrender.com']
 
     # En desarrollo local, permitir todos los orígenes
     return '*'

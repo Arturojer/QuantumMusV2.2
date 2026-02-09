@@ -56,5 +56,5 @@ def on_player_action(sid, data):
     return {'success': True}
 
 if __name__ == '__main__':
-    print('Starting mock Socket.IO server on http://localhost:5001')
+    print('Starting mock Socket.IO server on http://0.0.0.0:5001')
     eventlet.wsgi.server(eventlet.listen(('0.0.0.0', 5001)), app)
