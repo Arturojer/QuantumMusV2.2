@@ -386,6 +386,18 @@ def handle_start_game(data):
     if not room or len(room['players']) < 1:
         emit('game_error', {'error': 'Need at least 1 player to start'})
         return
+
+    # Require exactly 4 ready players before starting
+    if len(room['players']) != 4:
+        emit('game_error', {'error': f'Need 4 players to start ({len(room["players"])}/4)'} )
+        return
+
+    not_ready = [p for p in room['players'] if not p.get('character')]
+    if not_ready:
+        emit('game_error', {'error': 'All players must select a character before starting'})
+        return
+
+    room_manager.set_room_status(room_id, 'in_progress')
     
     # Create game instance
     game = game_manager.create_game(room_id, room['players'], room['game_mode'])

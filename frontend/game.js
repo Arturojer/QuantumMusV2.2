@@ -488,9 +488,67 @@ function initGame() {
   ];
   const N = lobbyPlayers.length;
   const L = localPlayerIndex;
+
+  // ===== Team-based zone assignment =====
+  // Zone 1 (player1, Bottom) = local player (lobby index L)
+  // Zone 3 (player3, Top)    = teammate (the other player in my team)
+  // Zone 2 (player2, Right)  = rival whose turn comes next after mine
+  // Zone 4 (player4, Left)   = remaining rival
+  //
+  // Step 1: Find my team and my teammate using lobby (absolute) indices
+  let myTeamKey = null;
+  let teammateIdx = null;
+  for (const [key, team] of Object.entries(gameState.teams)) {
+    if (team.players.includes(L)) {
+      myTeamKey = key;
+      teammateIdx = team.players.find(p => p !== L);
+      break;
+    }
+  }
+  if (myTeamKey === null) {
+    // Fallback: if teams don't contain localPlayerIndex, assume default
+    console.warn('[initGame] localPlayerIndex', L, 'not found in gameState.teams, falling back');
+    myTeamKey = 'team1';
+    teammateIdx = (L + 2) % N;
+  }
+
+  // Step 2: Identify rival team players
+  const rivalTeamKey = myTeamKey === 'team1' ? 'team2' : 'team1';
+  const rivals = [...gameState.teams[rivalTeamKey].players];
+
+  // Step 3: Among rivals, the one whose lobby index comes first
+  // when walking clockwise from L (i.e. L+1, L+2, …) is the "right" rival (Zone 2).
+  let rightRival = null;
+  let leftRival = null;
+  for (let step = 1; step < N; step++) {
+    const candidate = (L + step) % N;
+    if (rivals.includes(candidate)) {
+      rightRival = candidate;
+      leftRival = rivals.find(r => r !== rightRival);
+      break;
+    }
+  }
+
+  // Step 4: Ordered zone map  [Zone1, Zone2, Zone3, Zone4]
+  const zoneOrder = [L, rightRival, teammateIdx, leftRival];
+  console.log('[initGame] Team-based zone assignment — lobby→zone:', JSON.stringify(zoneOrder),
+    '| myTeam:', myTeamKey, '| teammate (lobby):', teammateIdx,
+    '| rightRival (lobby):', rightRival, '| leftRival (lobby):', leftRival);
+
+  // Build the lobby↔local lookup tables for server-index conversion
+  const lobbyToLocal = {};
+  const localToLobby = {};
+  zoneOrder.forEach((lobbyIdx, localIdx) => {
+    lobbyToLocal[lobbyIdx] = localIdx;
+    localToLobby[localIdx] = lobbyIdx;
+  });
+  gameState.lobbyToLocal = lobbyToLocal;
+  gameState.localToLobby = localToLobby;
+
+  // Step 5: Build the players array using the zone order
   const players = [];
   for (let i = 0; i < N; i++) {
-    const lobbyIdx = (L + i) % N;
+    const lobbyIdx = zoneOrder[i];
     const lp = lobbyPlayers[lobbyIdx];
     const charObj = characterList.find(c => c.id === lp.character);
     if (!charObj) continue;
@@ -503,6 +561,13 @@ function initGame() {
       score: 0
     });
   }
+
+  // Step 6: Update gameState.teams to LOCAL indices so the rest of the
+  // game logic (getPlayerTeam, getTeammate, scoring, etc.) works correctly.
+  // After zone assignment: local 0 (bottom) & 2 (top) = my team,
+  //                        local 1 (right) & 3 (left)  = rival team.
+  gameState.teams[myTeamKey].players  = [0, 2];
+  gameState.teams[rivalTeamKey].players = [1, 3];
   
   // Store player actual names for action notifications
   gameState.playerActualNames = players.map(p => p.playerName || p.name);
