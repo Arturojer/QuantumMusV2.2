@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class QuantumMusGame:
     """Main game class managing the Quantum Mus game state"""
     
-    def __init__(self, room_id, players, game_mode='4'):
+    def __init__(self, room_id, players, game_mode='4', teams=None):
         self.room_id = room_id
         self.players = players  # List of player dicts
         
@@ -35,23 +35,28 @@ class QuantumMusGame:
         # Store actual number of players for dynamic calculations
         self.num_players = len(players)
         
+        # Build teams from lobby data if not provided explicitly
+        if teams is None:
+            # Derive from player 'team' field (1 = Copenhaguen, 2 = Bohmian)
+            team1_indices = [i for i, p in enumerate(players) if p.get('team') == 1]
+            team2_indices = [i for i, p in enumerate(players) if p.get('team') == 2]
+            # Fallback to classic intercalated seating if team info missing
+            if len(team1_indices) != 2 or len(team2_indices) != 2:
+                logger.warning(f"Could not derive teams from player data, using default [0,2]/[1,3]")
+                team1_indices = [0, 2]
+                team2_indices = [1, 3]
+            teams = {
+                'team1': {'players': team1_indices, 'score': 0, 'name': 'Copenhaguen'},
+                'team2': {'players': team2_indices, 'score': 0, 'name': 'Bohmian'}
+            }
+        logger.info(f"Teams for room {room_id}: team1={teams['team1']['players']}, team2={teams['team2']['players']}")
+        
         # Game state
         self.state = {
             'currentRound': 'MUS',
             'manoIndex': 0,
             'activePlayerIndex': 0,
-            'teams': {
-                'team1': {
-                    'players': [0, 2],
-                    'score': 0,
-                    'name': 'Copenhaguen'
-                },
-                'team2': {
-                    'players': [1, 3],
-                    'score': 0,
-                    'name': 'Bohmian'
-                }
-            },
+            'teams': teams,
             'currentBet': {
                 'amount': 0,
                 'bettingTeam': None,

@@ -489,6 +489,35 @@ function initGame() {
   const N = lobbyPlayers.length;
   const L = localPlayerIndex;
 
+  // ===== Apply server/lobby team data BEFORE zone assignment =====
+  // In online mode, read team composition from initialServerState so the zone
+  // layout reflects the actual server teams.  In offline mode, derive teams
+  // from the lobby players' `.team` property (set by character selection).
+  (function applyTeamData() {
+    // 1) Try server state (online)
+    const serverSt = (window.initialServerState && (window.initialServerState.state || window.initialServerState)) || {};
+    if (serverSt.teams) {
+      const t1 = serverSt.teams.team1;
+      const t2 = serverSt.teams.team2;
+      if (t1 && t1.players) gameState.teams.team1.players = [...t1.players];
+      if (t2 && t2.players) gameState.teams.team2.players = [...t2.players];
+      if (t1 && t1.name) gameState.teams.team1.name = t1.name;
+      if (t2 && t2.name) gameState.teams.team2.name = t2.name;
+      console.log('[initGame] Applied server teams:', JSON.stringify(gameState.teams));
+      return;
+    }
+    // 2) Derive from lobby player `team` property (offline / character selection)
+    if (lobbyPlayers.length === 4) {
+      const t1 = lobbyPlayers.map((p, i) => ({ idx: i, team: p.team })).filter(x => x.team === 1).map(x => x.idx);
+      const t2 = lobbyPlayers.map((p, i) => ({ idx: i, team: p.team })).filter(x => x.team === 2).map(x => x.idx);
+      if (t1.length === 2 && t2.length === 2) {
+        gameState.teams.team1.players = t1;
+        gameState.teams.team2.players = t2;
+        console.log('[initGame] Derived teams from lobby:', JSON.stringify(gameState.teams));
+      }
+    }
+  })();
+
   // ===== Team-based zone assignment =====
   // Zone 1 (player1, Bottom) = local player (lobby index L)
   // Zone 3 (player3, Top)    = teammate (the other player in my team)
@@ -545,6 +574,24 @@ function initGame() {
   gameState.lobbyToLocal = lobbyToLocal;
   gameState.localToLobby = localToLobby;
 
+  // Helper functions for server↔local index conversion (team-aware, NOT simple rotation)
+  // These are also exposed on window so socket handlers outside initGame can use them.
+  function serverToLocal(serverIdx) {
+    if (gameState.lobbyToLocal && typeof gameState.lobbyToLocal[serverIdx] !== 'undefined') {
+      return gameState.lobbyToLocal[serverIdx];
+    }
+    // Fallback: simple rotation (should never happen if lobbyToLocal is set)
+    return ((serverIdx - L + 4) % 4);
+  }
+  function localToServer(localIdx) {
+    if (gameState.localToLobby && typeof gameState.localToLobby[localIdx] !== 'undefined') {
+      return gameState.localToLobby[localIdx];
+    }
+    return ((localIdx + L) % 4);
+  }
+  window.serverToLocal = serverToLocal;
+  window.localToServer = localToServer;
+
   // Step 5: Build the players array using the zone order
   const players = [];
   for (let i = 0; i < N; i++) {
@@ -581,8 +628,8 @@ function initGame() {
     const st = (window.initialServerState.state || window.initialServerState) || {};
     gameState.currentRound = st.currentRound || 'MUS';
     gameState.musPhaseActive = gameState.currentRound === 'MUS';
-    gameState.activePlayerIndex = ((st.activePlayerIndex ?? 0) - localIdx + 4) % 4;
-    gameState.manoIndex = ((st.manoIndex ?? 0) - localIdx + 4) % 4;
+    gameState.activePlayerIndex = serverToLocal(st.activePlayerIndex ?? 0);
+    gameState.manoIndex = serverToLocal(st.manoIndex ?? 0);
     if (st.teams) {
       gameState.teams.team1.score = st.teams.team1?.score ?? 0;
       gameState.teams.team2.score = st.teams.team2?.score ?? 0;
@@ -678,8 +725,8 @@ function initGame() {
       // If server provides mano, use it (convert from server index to local perspective)
       const gs = data.game_state || data.game_state.state || {};
       if (gs && typeof gs.manoIndex !== 'undefined') {
-        // server manoIndex is absolute; convert to local 0-based (player1) perspective
-        gameState.manoIndex = ((gs.manoIndex ?? 0) - localIdx + 4) % 4;
+        // server manoIndex is absolute; convert to local using team-aware map
+        gameState.manoIndex = serverToLocal(gs.manoIndex ?? 0);
         console.log('[ONLINE] Received manoIndex from server:', gs.manoIndex, '-> local manoIndex:', gameState.manoIndex);
         updateManoIndicators();
       }
@@ -698,10 +745,10 @@ function initGame() {
       if (st) {
         gameState.currentRound = st.currentRound || gameState.currentRound;
         if (typeof st.manoIndex !== 'undefined') {
-          gameState.manoIndex = ((st.manoIndex ?? 0) - localIdx + 4) % 4;
+          gameState.manoIndex = serverToLocal(st.manoIndex ?? 0);
           updateManoIndicators();
         }
-        gameState.activePlayerIndex = ((st.activePlayerIndex ?? 0) - localIdx + 4) % 4;
+        gameState.activePlayerIndex = serverToLocal(st.activePlayerIndex ?? 0);
         if (st.teams) {
           gameState.teams.team1.score = st.teams.team1?.score ?? 0;
           gameState.teams.team2.score = st.teams.team2?.score ?? 0;
@@ -713,12 +760,11 @@ function initGame() {
           if (declRes && declRes.declarations) {
             // Server declarations are keyed by server-side player indices.
             // Convert them to local indices before storing in client state.
-            const localOffset = window.QuantumMusLocalIndex || 0;
             const remapped = {};
             Object.keys(declRes.declarations).forEach(k => {
-              const serverIdx = parseInt(k, 10);
-              const localIdx = ((serverIdx - localOffset + 4) % 4);
-              remapped[localIdx] = declRes.declarations[k];
+              const sIdx = parseInt(k, 10);
+              const lIdx = serverToLocal(sIdx);
+              remapped[lIdx] = declRes.declarations[k];
             });
             if (declRes.round_name === 'PARES') {
               gameState.paresDeclarations = remapped;
@@ -740,7 +786,7 @@ function initGame() {
         // tunnel: { from, to, to_name, tunneled }
         const toAbs = (typeof tunnel.to !== 'undefined') ? tunnel.to : null;
         if (toAbs !== null) {
-          const localTo = ((toAbs ?? 0) - localIdx + 4) % 4;
+          const localTo = serverToLocal(toAbs ?? 0);
           gameState.manoIndex = localTo;
           gameState.activePlayerIndex = localTo; // Make tunneled starter active
           updateManoIndicators();
@@ -1055,7 +1101,7 @@ function initGame() {
   // Handle MUS round - players decide to mus or not
   function handleMusRound(playerIndex, action, extraData = {}) {
     if (window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom) {
-      const serverIdx = (playerIndex + (window.QuantumMusLocalIndex || 0)) % 4;
+      const serverIdx = localToServer(playerIndex);
       window.QuantumMusSocket.emit('player_action', {
         room_id: window.QuantumMusOnlineRoom,
         player_index: serverIdx,
@@ -1539,7 +1585,7 @@ function initGame() {
   // Handle betting round (Grande, Chica, Pares, Juego)
   function handleBettingRound(playerIndex, action, betAmount = 0) {
     if (window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom) {
-      const serverIdx = (playerIndex + (window.QuantumMusLocalIndex || 0)) % 4;
+      const serverIdx = localToServer(playerIndex);
       const data = action === 'raise' || action === 'envido' ? { amount: betAmount } : {};
       if (action === 'raise') action = 'envido';
       window.QuantumMusSocket.emit('player_action', {

@@ -307,7 +307,8 @@ def handle_set_character(data):
                     })
                     return
     
-    if room_manager.set_player_character(room_id, request.sid, character):
+    team = data.get('team')  # 1 = Copenhaguen, 2 = Bohmian
+    if room_manager.set_player_character(room_id, request.sid, character, team=team):
         socketio.emit('room_updated', {
             'room': room_manager.get_room(room_id)
         }, room=room_id)

@@ -167,9 +167,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function emitCharacterSelection(charId) {
     if (gameState.socket && gameState.socket.connected && gameState.roomId) {
+      // Find the team number for this character (1 = Copenhaguen, 2 = Bohmian)
+      const charObj = charId ? characters.find(c => c.id === charId) : null;
       gameState.socket.emit('set_character', {
         room_id: gameState.roomId,
-        character: charId
+        character: charId,
+        team: charObj ? charObj.team : null
       });
       // Force update of character grid to show 'Elegido' immediately
       setTimeout(() => { createCharacterSelection(); }, 100);

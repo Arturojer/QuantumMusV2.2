@@ -130,14 +130,18 @@ class RoomManager:
         """Get room ID for a player"""
         return self.player_rooms.get(socket_id)
 
-    def set_player_character(self, room_id, socket_id, character):
-        """Update character for a player already in the room"""
+    def set_player_character(self, room_id, socket_id, character, team=None):
+        """Update character and team for a player already in the room"""
         room = self.rooms.get(room_id)
         if not room:
             return False
         for player in room['players']:
             if player['socket_id'] == socket_id:
                 player['character'] = character
+                if team is not None:
+                    player['team'] = team
+                elif character is None:
+                    player.pop('team', None)
                 return True
         return False
     
