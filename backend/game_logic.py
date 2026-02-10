@@ -202,6 +202,7 @@ class QuantumMusGame:
             self.state['cardsDiscarded'] = {}
             self.state['waitingForDiscard'] = False
             self.state['roundActions'] = {}  # Reset so MUS round starts fresh
+            self.state['activePlayerIndex'] = self.state['manoIndex']  # Restart with mano
 
             logger.info(f"Successfully dealt new cards in game {self.room_id}")
             return {'success': True}
