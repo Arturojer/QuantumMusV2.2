@@ -4595,12 +4595,17 @@ function initGame() {
     }
     
     if (timerInterval) clearTimeout(timerInterval);
-    if (!isOnlineGame) {
-      timerInterval = setTimeout(() => {
-        // All timers expired - auto discard all cards for players who haven't acted
-        handleAllPlayersTimeout();
-      }, duration * 1000);
-    }
+    timerInterval = setTimeout(() => {
+      if (isOnlineGame) {
+        const localIdx = window.QuantumMusLocalIndex ?? window.currentLocalPlayerIndex ?? 0;
+        if (!gameState.cardsDiscarded || !gameState.cardsDiscarded[localIdx]) {
+          handleTimeout(localIdx);
+        }
+        return;
+      }
+      // All timers expired - auto discard all cards for players who haven't acted
+      handleAllPlayersTimeout();
+    }, duration * 1000);
 
     // Failsafe: set per-AI fallback timeouts in case AI-specific timeouts fail (offline/local only)
     if (!isOnlineGame) {
@@ -4679,7 +4684,19 @@ function initGame() {
   function handleTimeout(playerIndex) {
     console.log(`[TIMEOUT] Player ${playerIndex + 1} in round ${gameState.currentRound}`);
     if (window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom) {
-      console.warn('[TIMEOUT] Ignored in online mode (server authoritative)');
+      if (gameState.waitingForDiscard) {
+        console.log('Timeout en descarte: Descartando todo automáticamente');
+        const serverIdx = (typeof window.localToServer === 'function')
+          ? window.localToServer(playerIndex)
+          : playerIndex;
+        window.QuantumMusSocket.emit('discard_cards', {
+          room_id: window.QuantumMusOnlineRoom,
+          player_index: serverIdx,
+          card_indices: [0, 1, 2, 3]
+        });
+      } else {
+        console.warn('[TIMEOUT] Ignored in online mode (server authoritative)');
+      }
       return;
     }
     
