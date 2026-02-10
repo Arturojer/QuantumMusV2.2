@@ -17,6 +17,7 @@ import os
 from datetime import datetime
 import random
 import time
+import threading
 
 # Directorio del frontend (para servir archivos estáticos si aplica)
 FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'frontend'))
@@ -31,6 +32,7 @@ from game_manager import GameManager
 from room_manager import RoomManager
 from models import db, Game, Player, GameHistory
 from Logica_cuantica.baraja import QuantumDeck
+from config import get_config
 
 # Configure
 # Configure logging
@@ -60,12 +62,176 @@ socketio = SocketIO(
     transports=['websocket', 'http_long_polling']  # WebSocket primero, fallback a polling
 )
 
+# Timeouts (server-authoritative for online mode)
+CONFIG = get_config()
+TURN_TIMEOUT = getattr(CONFIG, 'TURN_TIMEOUT', 10)
+DISCARD_TIMEOUT = getattr(CONFIG, 'DISCARD_TIMEOUT', 10)
+
+# Room -> timeout handle (eventlet GreenThread or threading.Timer)
+turn_timeouts = {}
+discard_timeouts = {}
+
 # Initialize database
 db.init_app(app)
 
 # Initialize managers
 room_manager = RoomManager()
 game_manager = GameManager()
+
+
+def _cancel_timeout(handle):
+    if not handle:
+        return
+    try:
+        handle.cancel()
+        return
+    except Exception:
+        pass
+    try:
+        handle.kill()
+    except Exception:
+        pass
+
+
+def _replace_timeout(timeout_store, room_id, handle):
+    old = timeout_store.pop(room_id, None)
+    _cancel_timeout(old)
+    if handle:
+        timeout_store[room_id] = handle
+
+
+def _spawn_after(delay_seconds, callback):
+    if eventlet:
+        return eventlet.spawn_after(delay_seconds, callback)
+    timer = threading.Timer(delay_seconds, callback)
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
+def _broadcast_action_update(room_id, game, player_index, action, extra_data, result):
+    socketio.emit('game_update', {
+        'game_state': game.get_public_state(),
+        'action': {
+            'player_index': player_index,
+            'action': action,
+            'data': extra_data or {}
+        }
+    }, room=room_id)
+
+    if result.get('round_ended') and result.get('round_result') is not None:
+        socketio.emit('round_ended', {
+            'result': result['round_result']
+        }, room=room_id)
+
+    if result.get('hand_ended'):
+        updated_state = game.get_public_state()
+        updated_state['player_hands'] = {
+            i: [card.to_dict() for card in game.hands.get(i, [])]
+            for i in range(4)
+        }
+        updated_state['manoIndex'] = game.state['manoIndex']
+        updated_state['entanglement'] = game.get_full_entanglement_state()
+        socketio.emit('hand_started', {
+            'game_state': updated_state,
+            'game_mode': game.game_mode
+        }, room=room_id)
+
+    if result.get('game_ended'):
+        socketio.emit('game_ended', {
+            'winner': result['winner'],
+            'final_scores': result.get('final_scores')
+        }, room=room_id)
+
+
+def _schedule_discard_timeout(room_id):
+    game = game_manager.get_game(room_id)
+    if not game:
+        return
+    if not game.state.get('waitingForDiscard'):
+        _replace_timeout(discard_timeouts, room_id, None)
+        return
+
+    def on_timeout():
+        current_game = game_manager.get_game(room_id)
+        if not current_game:
+            return
+        if not current_game.state.get('waitingForDiscard'):
+            return
+
+        for player_idx in range(current_game.num_players):
+            if player_idx in current_game.state.get('cardsDiscarded', {}):
+                continue
+            result = current_game.discard_cards(player_idx, [0, 1, 2, 3])
+            if result.get('success'):
+                socketio.emit('cards_discarded', {
+                    'player_index': player_idx,
+                    'num_cards': 4,
+                    'game_state': current_game.get_public_state()
+                }, room=room_id)
+
+        if len(current_game.state.get('cardsDiscarded', {})) == current_game.num_players:
+            deal_result = current_game.deal_new_cards()
+            if deal_result and deal_result.get('success'):
+                socketio.emit('new_cards_dealt', {
+                    'success': True,
+                    'game_state': current_game.get_public_state(),
+                    'player_hands': {
+                        i: [card.to_dict() for card in current_game.hands.get(i, [])]
+                        for i in range(4)
+                    }
+                }, room=room_id)
+            else:
+                socketio.emit('game_error', {
+                    'error': 'Failed to deal new cards'
+                }, room=room_id)
+
+        _replace_timeout(discard_timeouts, room_id, None)
+        _schedule_turn_timeout(room_id)
+
+    _replace_timeout(discard_timeouts, room_id, _spawn_after(DISCARD_TIMEOUT, on_timeout))
+
+
+def _schedule_turn_timeout(room_id):
+    game = game_manager.get_game(room_id)
+    if not game:
+        return
+
+    if game.state.get('waitingForDiscard'):
+        _replace_timeout(turn_timeouts, room_id, None)
+        _schedule_discard_timeout(room_id)
+        return
+
+    active_player = game.state.get('activePlayerIndex')
+    current_round = game.state.get('currentRound')
+    if active_player is None:
+        return
+
+    def on_timeout():
+        current_game = game_manager.get_game(room_id)
+        if not current_game:
+            return
+        if current_game.state.get('waitingForDiscard'):
+            return
+        if current_game.state.get('activePlayerIndex') != active_player:
+            return
+        if current_game.state.get('currentRound') != current_round:
+            return
+
+        if current_game.state.get('currentRound') == 'MUS':
+            timeout_action = 'mus'
+        else:
+            timeout_action = 'paso'
+
+        result = current_game.process_action(active_player, timeout_action, {})
+        if not result.get('success'):
+            logger.warning(f"Timeout action failed: {result.get('error')}")
+            return
+
+        _broadcast_action_update(room_id, current_game, active_player, timeout_action, {}, result)
+        _schedule_turn_timeout(room_id)
+
+    _replace_timeout(turn_timeouts, room_id, _spawn_after(TURN_TIMEOUT, on_timeout))
 
 # Create tables
 with app.app_context():
@@ -405,6 +571,8 @@ def handle_start_game(data):
         'game_mode': room['game_mode']
     }, room=room_id)
 
+    _schedule_turn_timeout(room_id)
+
 @socketio.on('player_action')
 def handle_player_action(data):
     """Handle player action (MUS, PASO, ENVIDO, ORDAGO, etc.)"""
@@ -427,42 +595,13 @@ def handle_player_action(data):
     result = game.process_action(player_index, action, extra_data)
     
     if result['success']:
-        # Notify all players of game state update
-        socketio.emit('game_update', {
-            'game_state': game.get_public_state(),
-            'action': {
-                'player_index': player_index,
-                'action': action,
-                'data': extra_data
-            }
-        }, room=room_id)
-        
-        # Check if round ended
-        if result.get('round_ended') and result.get('round_result') is not None:
-            socketio.emit('round_ended', {
-                'result': result['round_result']
-            }, room=room_id)
+        _broadcast_action_update(room_id, game, player_index, action, extra_data, result)
 
-        # If a hand ended, broadcast the new hand state and hands
-        if result.get('hand_ended'):
-            updated_state = game.get_public_state()
-            updated_state['player_hands'] = {
-                i: [card.to_dict() for card in game.hands.get(i, [])]
-                for i in range(4)
-            }
-            updated_state['manoIndex'] = game.state['manoIndex']
-            updated_state['entanglement'] = game.get_full_entanglement_state()
-            socketio.emit('hand_started', {
-                'game_state': updated_state,
-                'game_mode': game.game_mode
-            }, room=room_id)
-        
-        # Check if game ended
         if result.get('game_ended'):
-            socketio.emit('game_ended', {
-                'winner': result['winner'],
-                'final_scores': result['final_scores']
-            }, room=room_id)
+            _replace_timeout(turn_timeouts, room_id, None)
+            _replace_timeout(discard_timeouts, room_id, None)
+        else:
+            _schedule_turn_timeout(room_id)
     else:
         emit('game_error', {'error': result.get('error', 'Invalid action')})
 
@@ -540,6 +679,8 @@ def handle_discard_cards(data):
                         for i in range(4)
                     }
                 }, room=room_id)
+                _replace_timeout(discard_timeouts, room_id, None)
+                _schedule_turn_timeout(room_id)
             else:
                 logger.error(f"Failed to deal new cards in room {room_id}")
                 socketio.emit('game_error', {'error': 'Failed to deal new cards'}, room=room_id)

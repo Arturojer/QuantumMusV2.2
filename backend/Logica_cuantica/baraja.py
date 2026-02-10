@@ -39,9 +39,9 @@ class QuantumDeck:
         # Estados en 6 bits (q0..q5): [palo(2)][valor(4)]
         self.king_pit_collapsed: Dict[str, Tuple[str, str]] = {}
 
-        # Cache del colapso Dos-Tres: palo -> (estado_2, estado_3)
+        # Cache del colapso Tres-Dos: palo -> (estado_3, estado_2)
         # Estados en 6 bits (q0..q5): [palo(2)][valor(4)]
-        self.two_three_collapsed: Dict[str, Tuple[str, str]] = {}
+        self.tres_dos_collapsed: Dict[str, Tuple[str, str]] = {}
 
     def _create_deck(self) -> List[QuantumCard]:
         cards: List[QuantumCard] = []
@@ -110,35 +110,39 @@ class QuantumDeck:
         return pair
 
     # ------------------------------------------------------------
-    # Dos-Tres "entrelazado" (simple + consistente)
+    # Tres-Dos "entrelazado" (simple + consistente)
     # ------------------------------------------------------------
-    def collapse_two_three(self, palo: str) -> Tuple[str, str]:
+    def collapse_tres_dos(self, palo: str) -> Tuple[str, str]:
         """
-        Colapsa el par Dos-Tres de un palo de manera consistente:
-        - Primera vez: decide aleatoriamente si queda (2,3) o (3,2)
+        Colapsa el par Tres-Dos de un palo de manera consistente:
+        - Primera vez: decide aleatoriamente si queda (3,2) o (2,3)
         - A partir de ahí: siempre devuelve lo mismo (cache).
         """
         if palo not in self.PALO_CODE:
             raise ValueError(f"Palo inválido: {palo}")
 
         if not self.enable_two_three_entanglement:
-            dos = self.PALO_CODE[palo] + self.VALOR_CODE[2]
             tres = self.PALO_CODE[palo] + self.VALOR_CODE[3]
-            return dos, tres
+            dos = self.PALO_CODE[palo] + self.VALOR_CODE[2]
+            return tres, dos
 
-        if palo in self.two_three_collapsed:
-            return self.two_three_collapsed[palo]
+        if palo in self.tres_dos_collapsed:
+            return self.tres_dos_collapsed[palo]
 
-        dos = self.PALO_CODE[palo] + self.VALOR_CODE[2]
         tres = self.PALO_CODE[palo] + self.VALOR_CODE[3]
+        dos = self.PALO_CODE[palo] + self.VALOR_CODE[2]
 
         if np.random.rand() < 0.5:
-            pair = (dos, tres)
-        else:
             pair = (tres, dos)
+        else:
+            pair = (dos, tres)
 
-        self.two_three_collapsed[palo] = pair
+        self.tres_dos_collapsed[palo] = pair
         return pair
+
+    # Compatibilidad con vuestro nombre anterior
+    def collapse_two_three(self, palo: str) -> Tuple[str, str]:
+        return self.collapse_tres_dos(palo)
 
     # Compatibilidad con vuestro nombre anterior
     def measure_king_pit(self, palo: str) -> Tuple[str, str]:

@@ -105,13 +105,13 @@ class QuantumDealer:
                 card.set_collapsed_state(chosen)
                 self.measured_states[card.card_id] = chosen
 
-        # 3) Dos-Tres si aparecen en la mano
+        # 3) Tres-Dos si aparecen en la mano
         for card in hand:
             if card.measured_state is not None:
                 continue
 
             if card.valor in (2, 3):
-                dos_state, tres_state = self.deck.collapse_two_three(card.palo)
+                tres_state, dos_state = self.deck.collapse_tres_dos(card.palo)
 
                 def valor_from_state(state6: str) -> int:
                     return QuantumCard.VALORES.get(state6[2:], -1)
@@ -122,7 +122,7 @@ class QuantumDealer:
                 if card.valor == 2:
                     chosen = dos_state if ds_val == 2 else tres_state
                 else:
-                    chosen = dos_state if ds_val == 3 else tres_state
+                    chosen = tres_state if ts_val == 3 else dos_state
 
                 card.set_collapsed_state(chosen)
                 self.measured_states[card.card_id] = chosen
