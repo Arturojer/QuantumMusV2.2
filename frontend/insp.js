@@ -456,6 +456,12 @@ function initGame() {
   
   // Handle card discard
   function handleDiscard(playerIndex, cardIndices) {
+    // If no cards selected (empty array or undefined), discard all 4 cards
+    if (!cardIndices || cardIndices.length === 0) {
+      cardIndices = [0, 1, 2, 3];
+      console.log(`Player ${playerIndex + 1} - no cards selected, auto-discarding all 4 cards`);
+    }
+    
     console.log(`Player ${playerIndex + 1} discarded ${cardIndices.length} cards`);
     gameState.cardsDiscarded[playerIndex] = cardIndices;
     
@@ -2558,17 +2564,17 @@ function initGame() {
         }
       });
 
-      // Only allow discard if at least one card is selected
-      if (selectedCards.length === 0) {
-        return; // Don't do anything if no cards selected
-      }
+      // If no cards selected or less than one card selected, discard all cards
+      const cardsToDiscard = (selectedCards.length < 1) ? [0, 1, 2, 3] : selectedCards;
+      
+      console.log(`[DISCARD BUTTON] Selected ${selectedCards.length} cards, discarding:`, cardsToDiscard);
 
       // Disable discard button
       discardBtn.disabled = true;
       discardBtn.style.opacity = '0.5';
 
       // Discard selected cards - keep them gray
-      handleDiscard(localPlayerIndex, selectedCards);
+      handleDiscard(localPlayerIndex, cardsToDiscard);
 
       // Remove discard button
       discardBtn.remove();

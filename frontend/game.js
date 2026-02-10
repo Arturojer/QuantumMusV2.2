@@ -846,7 +846,34 @@ function initGame() {
       const gs = data.game_state || {};
       const st = gs.state || gs;
       if (st) {
+        const previousRound = gameState.currentRound;
         gameState.currentRound = st.currentRound || gameState.currentRound;
+        
+        // Detect round transitions and reset state accordingly
+        if (previousRound !== gameState.currentRound) {
+          console.log(`[ONLINE] Round transition: ${previousRound} -> ${gameState.currentRound}`);
+          gameState.roundActions = {}; // Reset actions whenever round changes
+          
+          // Special handling for MUS -> GRANDE transition
+          if (previousRound === 'MUS' && gameState.currentRound === 'GRANDE') {
+            console.log('[ONLINE] MUS -> GRANDE transition');
+            gameState.musPhaseActive = false;
+            
+            // Determine who cut MUS from the action data
+            if (data.action && typeof data.action.player_index !== 'undefined') {
+              const cutterServerIdx = data.action.player_index;
+              gameState.musCutterIndex = serverToLocal(cutterServerIdx);
+              console.log(`[ONLINE] MUS cut by player ${gameState.musCutterIndex + 1} (${data.action.action})`);
+            }
+            
+            // If bet originated in MUS, set flag to preserve classical order
+            if (gameState.currentBet && gameState.currentBet.betType) {
+              gameState._musBetPending = true;
+              console.log('[ONLINE] Bet originated in MUS - preserving classical defender order');
+            }
+          }
+        }
+        
         if (typeof st.manoIndex !== 'undefined') {
           gameState.manoIndex = serverToLocal(st.manoIndex ?? 0);
           updateManoIndicators();
@@ -857,14 +884,27 @@ function initGame() {
           gameState.teams.team2.score = st.teams.team2?.score ?? 0;
         }
         gameState.currentBet = st.currentBet || gameState.currentBet;
+        
+        // Clear MUS bet pending flag when processing betting responses in GRANDE
+        if (gameState.currentRound === 'GRANDE' && gameState._musBetPending && data.action) {
+          const actionType = data.action.action;
+          if (actionType && ['paso', 'envido', 'ordago', 'accept', 'reject'].includes(actionType)) {
+            console.log('[ONLINE] Clearing _musBetPending (processing betting action)');
+            gameState._musBetPending = false;
+          }
+        }
+        
         const previousWaiting = gameState.waitingForDiscard;
         gameState.waitingForDiscard = !!st.waitingForDiscard;
-        if (gameState.waitingForDiscard) {
+        if (gameState.waitingForDiscard && !previousWaiting) {
+          // Just entered discard phase - start simultaneous timer for all players
+          console.log('[ONLINE] Entering discard phase - starting 10s timer for all players');
           gameState.roundActions = {};
-          if (!gameState.cardsDiscarded || !gameState.cardsDiscarded[0]) {
-            showDiscardUI();
-          }
-        } else if (previousWaiting) {
+          gameState.cardsDiscarded = {}; // Reset discard tracking
+          showDiscardUI();
+          startAllPlayersTimer(10);
+        } else if (previousWaiting && !gameState.waitingForDiscard) {
+          // Exiting discard phase
           const discardBtn = document.getElementById('discard-button');
           if (discardBtn) discardBtn.remove();
         }
@@ -941,6 +981,83 @@ function initGame() {
         const winnerTeam = data.winner === 'team1' ? 1 : 2;
         const fs = data.final_scores || {};
         window.showGameOver(winnerTeam, { team1: fs.team1 || 0, team2: fs.team2 || 0 }, { rounds: 0 });
+      }
+    });
+    socket.on('cards_discarded', (data) => {
+      try {
+        const localIdx = serverToLocal(data.player_index);
+        console.log(`[ONLINE] Player ${localIdx + 1} discarded ${data.num_cards} cards`);
+        
+        // Mark this player as having discarded
+        gameState.cardsDiscarded[localIdx] = new Array(data.num_cards).fill(0).map((_, i) => i);
+        
+        // Update UI to show visual feedback that this player discarded
+        const playerId = `player${localIdx + 1}`;
+        const playerZone = document.getElementById(`${playerId}-zone`);
+        if (playerZone) {
+          const cards = playerZone.querySelectorAll('.quantum-card');
+          cards.forEach((card, idx) => {
+            if (idx < data.num_cards) {
+              card.style.transform = 'translateY(-15px) scale(0.95)';
+              card.style.filter = 'grayscale(100%) brightness(0.3)';
+              card.style.transition = 'all 0.3s ease-out';
+            }
+          });
+        }
+        
+        // Hide timer for this player
+        hideTimerBar(localIdx);
+      } catch (e) {
+        console.warn('[socket:cards_discarded] handler failed', e);
+      }
+    });
+    socket.on('new_cards_dealt', (data) => {
+      try {
+        console.log('[ONLINE] New cards dealt - restarting MUS round');
+        
+        // Clear timer
+        if (timerInterval) {
+          clearTimeout(timerInterval);
+          timerInterval = null;
+        }
+        
+        // Update game state
+        const gs = data.game_state || {};
+        const st = gs.state || gs;
+        if (st) {
+          gameState.currentRound = st.currentRound || 'MUS';
+          gameState.activePlayerIndex = serverToLocal(st.activePlayerIndex ?? st.manoIndex ?? 0);
+          gameState.waitingForDiscard = false;
+          gameState.cardsDiscarded = {};
+          gameState.roundActions = {};
+          gameState.musPhaseActive = true;
+        }
+        
+        // Update player hands from server and re-render
+        if (data.player_hands) {
+          renderHandsFromServer(data.player_hands, window.currentGameMode || '4');
+        }
+        
+        // Remove discard button if it exists
+        const discardBtn = document.getElementById('discard-button');
+        if (discardBtn) discardBtn.remove();
+        
+        // Show quantum gate controls again
+        const controls = document.querySelector('.scoreboard-controls');
+        if (controls) {
+          controls.style.display = 'flex';
+        }
+        
+        // Update displays
+        updateRoundDisplay();
+        updateScoreboard();
+        
+        // Start new turn with mano player
+        setTimeout(() => {
+          startPlayerTurnTimer(gameState.activePlayerIndex);
+        }, 500);
+      } catch (e) {
+        console.warn('[socket:new_cards_dealt] handler failed', e);
       }
     });
   } else {
@@ -1241,14 +1358,6 @@ function initGame() {
         action: action,
         data: extraData
       });
-      // Fix: For online mode, check if all players have responded and force discard phase if needed
-      setTimeout(() => {
-        const actions = Object.values(gameState.roundActions);
-        if (actions.length === 4 && actions.every(a => a === 'mus')) {
-          console.log('[ONLINE] All players chose MUS - forcing discard phase');
-          startDiscardPhase();
-        }
-      }, 1000);
       return;
     }
     console.log(`Player ${playerIndex + 1} chose: ${action}`);
@@ -1634,11 +1743,47 @@ function initGame() {
   
   // Handle card discard
   function handleDiscard(playerIndex, cardIndices) {
+    // If no cards selected (empty array or undefined), discard all 4 cards
+    if (!cardIndices || cardIndices.length === 0) {
+      cardIndices = [0, 1, 2, 3];
+      console.log(`[HANDLE DISCARD] Player ${playerIndex + 1} - no cards selected, auto-discarding all 4 cards`);
+    }
+    
     console.log(`[HANDLE DISCARD] Player ${playerIndex + 1} discarding cards:`, cardIndices);
     
     // Prevent double-discard
     if (gameState.cardsDiscarded[playerIndex]) {
       console.log(`[HANDLE DISCARD] Player ${playerIndex + 1} has already discarded, ignoring`);
+      return;
+    }
+    
+    // In online mode, send discard to server
+    if (window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom) {
+      const serverIdx = localToServer(playerIndex);
+      console.log(`[ONLINE] Sending discard for player ${playerIndex + 1} (server index ${serverIdx})`);
+      window.QuantumMusSocket.emit('discard_cards', {
+        room_id: window.QuantumMusOnlineRoom,
+        player_index: serverIdx,
+        card_indices: cardIndices
+      });
+      
+      // Mark as discarded locally for immediate UI feedback
+      gameState.cardsDiscarded[playerIndex] = cardIndices;
+      
+      // Visual feedback: mark discarded cards immediately
+      const playerId = `player${playerIndex + 1}`;
+      const playerZone = document.getElementById(`${playerId}-zone`);
+      if (playerZone) {
+        const cards = playerZone.querySelectorAll('.quantum-card');
+        cardIndices.forEach(cardIndex => {
+          if (cards[cardIndex]) {
+            cards[cardIndex].style.transform = 'translateY(-15px) scale(0.95)';
+            cards[cardIndex].style.filter = 'grayscale(100%) brightness(0.3)';
+            cards[cardIndex].style.transition = 'all 0.3s ease-out';
+          }
+        });
+      }
+      hideTimerBar(playerIndex);
       return;
     }
     
@@ -5106,8 +5251,10 @@ function initGame() {
         }
       });
       
-      // If no cards selected, select all cards (same as discarding all)
-      const cardsToDiscard = selectedCards.length === 0 ? [0, 1, 2, 3] : selectedCards;
+      // If no cards selected or less than one card selected, discard all cards
+      const cardsToDiscard = (selectedCards.length < 1) ? [0, 1, 2, 3] : selectedCards;
+      
+      console.log(`[DISCARD BUTTON] Selected ${selectedCards.length} cards, discarding:`, cardsToDiscard);
       
       // Disable discard button
       discardBtn.disabled = true;
