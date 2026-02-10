@@ -782,6 +782,12 @@ function initGame() {
     }
     socket.emit('get_game_state', { room_id: roomId, player_index: localIdx });
     socket.once('game_state', (data) => {
+      console.log('DEBUG FRONTEND: Recibido evento de juego. Datos crudos:', data);
+      if (data.game_state && data.game_state.my_hand) {
+        console.log('DEBUG FRONTEND: Mi mano es:', data.game_state.my_hand);
+      } else {
+        console.error('DEBUG FRONTEND: ¡No encuentro my_hand en los datos!');
+      }
       // Fix: Always show hand for local player, even if my_hand is missing
       const handContainer = document.querySelector('#player1-zone .cards-row');
       handContainer.innerHTML = '';
@@ -846,10 +852,17 @@ function initGame() {
       }
     });
     socket.on('hand_started', (data) => {
+      console.log('DEBUG FRONTEND: Recibido evento de juego. Datos crudos:', data);
+      if (data.game_state && data.game_state.my_hand) {
+        console.log('DEBUG FRONTEND: Mi mano es:', data.game_state.my_hand);
+      } else {
+        console.error('DEBUG FRONTEND: ¡No encuentro my_hand en los datos!');
+      }
       try {
         if (timerInterval) { clearTimeout(timerInterval); timerInterval = null; }
         if (aiDecisionTimeout) { clearTimeout(aiDecisionTimeout); aiDecisionTimeout = null; }
         applyServerSnapshot(data || {});
+        console.log('DEBUG FRONTEND: Snapshot aplicado. playerHands:', gameState.playerHands);
         setTimeout(() => {
           startPlayerTurnTimer(gameState.activePlayerIndex);
         }, 500);

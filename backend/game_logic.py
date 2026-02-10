@@ -106,6 +106,7 @@ class QuantumMusGame:
                 if not self.hands[player_idx] or len(self.hands[player_idx]) != 4:
                     logger.error(f"Failed to deal 4 cards to player {player_idx}")
                     return {'success': False, 'error': f'Failed to deal cards to player {player_idx}'}
+            print(f"DEBUG: Repartiendo cartas. Manos generadas: {self.hands}")
             for player_idx in range(self.num_players, 4):
                 self.hands[player_idx] = []
             logger.info(f"[QSKIT] Dealt cards quantumly to {self.num_players} players in game {self.room_id}")
@@ -248,7 +249,7 @@ class QuantumMusGame:
         # Add player's hand
         state['my_hand'] = [card.to_dict() for card in self.hands.get(player_index, [])]
         state['my_index'] = player_index
-        
+        print(f"DEBUG: Enviando estado a jugador {player_index}. Datos de mano: {state.get('my_hand')}")
         return state
     
     def get_player_team(self, player_index):
