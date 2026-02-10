@@ -13,7 +13,12 @@ function mapBackendCardToFrontend(cardData) {
   };
   const rawSuit = (cardData && typeof cardData.palo !== 'undefined') ? String(cardData.palo).toLowerCase() : '';
   const suit = suitMap[rawSuit] || suitMap[rawSuit.replace(/s$/, '')] || rawSuit;
-  const value = cardData ? cardData.valor : undefined;
+  const rawValue = cardData ? cardData.valor : undefined;
+  let value = rawValue;
+  if (rawValue === '1' || rawValue === 1) value = 'A';
+  else if (rawValue === '10' || rawValue === 10) value = 'J';
+  else if (rawValue === '11' || rawValue === 11) value = 'Q';
+  else if (rawValue === '12' || rawValue === 12) value = 'K';
   return { value, suit };
 }
 
@@ -757,7 +762,13 @@ function initGame() {
           const suit = mappedCard.suit || 'oros';
           const map = suitMap[suit] || suitMap.oros;
           const cardEl = createCard(mappedCard.value, map[0], map[1], i, isCurrentPlayer, isTeammate, map[2], localIdx, gameMode);
-          if (cardEl) cardsRow.appendChild(cardEl);
+          if (cardEl) {
+            cardsRow.appendChild(cardEl);
+            // Forzar visibilidad inmediata eliminando la clase de animacion pendiente
+            cardEl.classList.remove('card-dealing');
+            cardEl.classList.add('card-dealt');
+            cardEl.style.opacity = '1'; // Asegurar opacidad
+          }
         });
       }
 
@@ -822,7 +833,13 @@ function initGame() {
         const mappedCard = mapBackendCardToFrontend(c);
         const s = suitMap[mappedCard.suit] || suitMap.oros;
         const card = createCard(mappedCard.value, s[0], s[1], i, true, false, s[2], 0, gameMode);
-        if (card) handContainer.appendChild(card);
+        if (card) {
+          handContainer.appendChild(card);
+          // Forzar visibilidad inmediata eliminando la clase de animacion pendiente
+          card.classList.remove('card-dealing');
+          card.classList.add('card-dealt');
+          card.style.opacity = '1'; // Asegurar opacidad
+        }
       });
     });
     socket.on('game_update', (data) => {
