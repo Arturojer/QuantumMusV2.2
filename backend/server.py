@@ -15,6 +15,7 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 import logging
 import os
 from datetime import datetime
+import random
 import time
 
 # Directorio del frontend (para servir archivos estáticos si aplica)
@@ -368,6 +369,9 @@ def handle_start_game(data):
     
     # Create game instance
     game = game_manager.create_game(room_id, room['players'], room['game_mode'])
+    # Server-authoritative mano for all clients
+    game.state['manoIndex'] = random.randrange(game.num_players)
+    game.state['activePlayerIndex'] = game.state['manoIndex']
     
     # Deal initial cards
     deal_result = game.deal_cards()
@@ -437,6 +441,20 @@ def handle_player_action(data):
         if result.get('round_ended'):
             socketio.emit('round_ended', {
                 'result': result['round_result']
+            }, room=room_id)
+
+        # If a hand ended, broadcast the new hand state and hands
+        if result.get('hand_ended'):
+            updated_state = game.get_public_state()
+            updated_state['player_hands'] = {
+                i: [card.to_dict() for card in game.hands.get(i, [])]
+                for i in range(4)
+            }
+            updated_state['manoIndex'] = game.state['manoIndex']
+            updated_state['entanglement'] = game.get_full_entanglement_state()
+            socketio.emit('hand_started', {
+                'game_state': updated_state,
+                'game_mode': game.game_mode
             }, room=room_id)
         
         # Check if game ended

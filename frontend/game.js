@@ -715,6 +715,71 @@ function initGame() {
   if (isOnline && window.QuantumMusSocket && window.QuantumMusOnlineRoom) {
     const socket = window.QuantumMusSocket;
     const roomId = window.QuantumMusOnlineRoom;
+
+    function renderHandsFromServer(playerHands, gameMode) {
+      const suitMap = {
+        oros: ['theta', 'θ', '#f5c518'],
+        copas: ['phi', 'φ', '#ff6b6b'],
+        espadas: ['delta', 'δ', '#a78bfa'],
+        bastos: ['psi', 'ψ', '#2ec4b6']
+      };
+      const mappedHands = {};
+      Object.keys(playerHands || {}).forEach((sIdx) => {
+        const serverIdx = parseInt(sIdx, 10);
+        if (Number.isNaN(serverIdx)) return;
+        const localIdx = serverToLocal(serverIdx);
+        mappedHands[localIdx] = playerHands[sIdx] || [];
+      });
+      gameState.playerHands = mappedHands;
+
+      for (let localIdx = 0; localIdx < 4; localIdx++) {
+        const cardsRow = document.querySelector(`#player${localIdx + 1}-zone .cards-row`);
+        if (!cardsRow) continue;
+        cardsRow.innerHTML = '';
+        const isCurrentPlayer = localIdx === 0;
+        const isTeammate = localIdx === 2;
+        const hand = mappedHands[localIdx] || [];
+        hand.forEach((card, i) => {
+          const suit = card.suit || 'oros';
+          const map = suitMap[suit] || suitMap.oros;
+          const cardEl = createCard(card.value, map[0], map[1], i, isCurrentPlayer, isTeammate, map[2], localIdx, gameMode);
+          if (cardEl) cardsRow.appendChild(cardEl);
+        });
+      }
+
+      matchEntangledCards();
+    }
+
+    function applyServerSnapshot(payload) {
+      const gs = payload.game_state || {};
+      const st = gs.state || gs;
+      if (!st) return;
+      gameState.currentRound = st.currentRound || gameState.currentRound;
+      gameState.musPhaseActive = gameState.currentRound === 'MUS';
+      if (typeof st.manoIndex !== 'undefined') {
+        gameState.manoIndex = serverToLocal(st.manoIndex ?? 0);
+      }
+      if (typeof st.activePlayerIndex !== 'undefined') {
+        gameState.activePlayerIndex = serverToLocal(st.activePlayerIndex ?? 0);
+      }
+      if (st.teams) {
+        gameState.teams.team1.score = st.teams.team1?.score ?? gameState.teams.team1.score;
+        gameState.teams.team2.score = st.teams.team2?.score ?? gameState.teams.team2.score;
+      }
+      gameState.currentBet = st.currentBet || gameState.currentBet;
+      gameState.waitingForDiscard = st.waitingForDiscard || false;
+      if (gs.entanglement) {
+        updateEntanglementState(gs.entanglement);
+      }
+      if (payload.game_state && payload.game_state.player_hands) {
+        renderHandsFromServer(payload.game_state.player_hands, payload.game_mode || window.currentGameMode || '4');
+      } else if (payload.player_hands) {
+        renderHandsFromServer(payload.player_hands, payload.game_mode || window.currentGameMode || '4');
+      }
+      updateManoIndicators();
+      updateRoundDisplay();
+      updateScoreboard();
+    }
     socket.emit('get_game_state', { room_id: roomId, player_index: localIdx });
     socket.once('game_state', (data) => {
       // Fix: Always show hand for local player, even if my_hand is missing
@@ -723,7 +788,7 @@ function initGame() {
       const suitMap = { oros: ['theta', 'θ', '#f5c518'], copas: ['phi', 'φ', '#ff6b6b'], espadas: ['delta', 'δ', '#a78bfa'], bastos: ['psi', 'ψ', '#2ec4b6'] };
       let hand = (data.game_state && data.game_state.my_hand) || (data.game_state && data.game_state.hands && data.game_state.hands[localIdx]) || [];
       // If server provides mano, use it (convert from server index to local perspective)
-      const gs = data.game_state || data.game_state.state || {};
+      const gs = (data.game_state && (data.game_state.state || data.game_state)) || {};
       if (gs && typeof gs.manoIndex !== 'undefined') {
         // server manoIndex is absolute; convert to local using team-aware map
         gameState.manoIndex = serverToLocal(gs.manoIndex ?? 0);
@@ -778,6 +843,18 @@ function initGame() {
         updateRoundDisplay();
         updateScoreboard();
         startPlayerTurnTimer(gameState.activePlayerIndex);
+      }
+    });
+    socket.on('hand_started', (data) => {
+      try {
+        if (timerInterval) { clearTimeout(timerInterval); timerInterval = null; }
+        if (aiDecisionTimeout) { clearTimeout(aiDecisionTimeout); aiDecisionTimeout = null; }
+        applyServerSnapshot(data || {});
+        setTimeout(() => {
+          startPlayerTurnTimer(gameState.activePlayerIndex);
+        }, 500);
+      } catch (e) {
+        console.warn('[hand_started] handler failed', e);
       }
     });
     // Server informs all clients when a tunneling moved the mano
@@ -3280,6 +3357,8 @@ function initGame() {
   function finishHand() {
     console.log('Finishing hand - awarding points via CONTEO');
 
+    const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
+
     // Cards are already revealed at this point (done in moveToNextRound)
     
     // Wait 7 seconds before showing point panel (user request)
@@ -3334,7 +3413,10 @@ function initGame() {
       gameState.puntoPlayed = false;
 
       showHandSummary(scoringDetails);
-
+      if (isOnlineGame) {
+        console.log('[ONLINE] Waiting for server to start new hand');
+        return;
+      }
       setTimeout(() => {
         startNewHand();
       }, 5000); // 5 seconds before starting new hand (allow score panel to fade)
@@ -3767,6 +3849,8 @@ function initGame() {
   // Start new hand
   function startNewHand() {
     console.log('Starting new hand...');
+
+    const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
     
     // Increment hands counter
     gameState.handsPlayed++;
@@ -3822,33 +3906,38 @@ function initGame() {
     const previousMano = gameState.manoIndex;
 
     // Determine next mano with optional tunneling for demo inspection
-    try {
-      const numPlayers = 4;
-      const classicNext = (gameState.manoIndex - 1 + numPlayers) % numPlayers; // counter-clockwise
-      let nextMano;
+    if (isOnlineGame) {
+      // In online mode, mano is server-authoritative; keep current value.
+      gameState.activePlayerIndex = gameState.manoIndex;
+    } else {
+      try {
+        const numPlayers = 4;
+        const classicNext = (gameState.manoIndex - 1 + numPlayers) % numPlayers; // counter-clockwise
+        let nextMano;
 
-      if (gameState.forceTunnelNextHand) {
-        const candidates = [...Array(numPlayers).keys()].filter(i => i !== classicNext);
-        nextMano = candidates[Math.floor(Math.random() * candidates.length)];
-        gameState.forceTunnelNextHand = false;
-        console.log('[NEW HAND] Forced mano tunneling applied for demo.');
-      } else {
-        const pClassic = gameState.tunnelPClassic ?? 0.99;
-        if (Math.random() < pClassic) {
-          nextMano = classicNext;
-        } else {
+        if (gameState.forceTunnelNextHand) {
           const candidates = [...Array(numPlayers).keys()].filter(i => i !== classicNext);
           nextMano = candidates[Math.floor(Math.random() * candidates.length)];
-          console.log('[NEW HAND] Mano tunneling occurred (demo random).');
+          gameState.forceTunnelNextHand = false;
+          console.log('[NEW HAND] Forced mano tunneling applied for demo.');
+        } else {
+          const pClassic = gameState.tunnelPClassic ?? 0.99;
+          if (Math.random() < pClassic) {
+            nextMano = classicNext;
+          } else {
+            const candidates = [...Array(numPlayers).keys()].filter(i => i !== classicNext);
+            nextMano = candidates[Math.floor(Math.random() * candidates.length)];
+            console.log('[NEW HAND] Mano tunneling occurred (demo random).');
+          }
         }
-      }
 
-      gameState.manoIndex = nextMano;
-      gameState.activePlayerIndex = gameState.manoIndex;
-    } catch (e) {
-      gameState.manoIndex = (gameState.manoIndex - 1 + 4) % 4; // Rotate mano counter-clockwise (fallback)
-      gameState.activePlayerIndex = gameState.manoIndex;
-      console.warn('[NEW HAND] Tunneling logic failed, defaulting to classic rotation', e);
+        gameState.manoIndex = nextMano;
+        gameState.activePlayerIndex = gameState.manoIndex;
+      } catch (e) {
+        gameState.manoIndex = (gameState.manoIndex - 1 + 4) % 4; // Rotate mano counter-clockwise (fallback)
+        gameState.activePlayerIndex = gameState.manoIndex;
+        console.warn('[NEW HAND] Tunneling logic failed, defaulting to classic rotation', e);
+      }
     }
     resetRoundState();
     // Clear declaration maps and pre-declarations for a fresh mano
