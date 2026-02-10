@@ -330,9 +330,9 @@ class QuantumMusGame:
         if self.state['currentRound'] not in ['MUS', 'GRANDE', 'CHICA', 'PARES', 'JUEGO']:
             logger.warning(f"Invalid round state before new hand: {self.state['currentRound']}")
         
-        # Rotate mano to next player (counter-clockwise)
+        # Rotate mano to next player (clockwise)
         old_mano = self.state['manoIndex']
-        self.state['manoIndex'] = (self.state['manoIndex'] + 3) % 4  # Same as +1 but explicit
+        self.state['manoIndex'] = (self.state['manoIndex'] + 1) % 4
         self.state['activePlayerIndex'] = self.state['manoIndex']
         
         # Reset round state
