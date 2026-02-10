@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 class GrandeBettingHandler:
     """
     Handles the Grande phase betting according to Mus rules:
-    - Sequential turn-based betting (clockwise)
+    - Sequential turn-based betting (counterclockwise/right)
     - Team-based attack/defense dynamics
     - Rejection, acceptance, raise, and órdago logic
     - Deferred hand comparison (after all 4 phases)
@@ -82,7 +82,7 @@ class GrandeBettingHandler:
             # Player passes (checks)
             logger.info(f"Player {player_index} passes (no bet)")
             
-            # Move to next player clockwise
+            # Move to next player counterclockwise/right
             next_player = self._get_next_player_clockwise(player_index)
             
             # Check if we've completed a full circle (back to mano)
@@ -127,7 +127,7 @@ class GrandeBettingHandler:
         
         logger.info(f"Player {player_index} ({betting_team}) placed {bet_type} bet: {bet_amount} points")
         
-        # Find first defender to respond (closest to Mano clockwise who is on defending team)
+        # Find first defender to respond (closest to Mano counterclockwise/right who is on defending team)
         first_defender = self._get_next_defender_clockwise(player_index)
         self.game.state['activePlayerIndex'] = first_defender
         
@@ -220,7 +220,7 @@ class GrandeBettingHandler:
         
         logger.info(f"Player {player_index} raises to {new_bet_amount} ({'ÓRDAGO' if is_ordago else 'ENVIDO'})")
         
-        # Find first defender from new defending team (closest to Mano clockwise)
+        # Find first defender from new defending team (closest to Mano counterclockwise/right)
         first_defender = self._get_first_team_member_from_mano(old_attacking_team)
         self.game.state['activePlayerIndex'] = first_defender
         
@@ -363,19 +363,19 @@ class GrandeBettingHandler:
     # Helper methods
     
     def _get_next_player_clockwise(self, current_player):
-        """Get next player in clockwise order (current + 1) mod 4"""
-        return (current_player + 1) % 4
+        """Get next player in counterclockwise/right order (current - 1) mod 4"""
+        return (current_player - 1) % 4
     
     def _get_next_defender_clockwise(self, current_player):
         """
-        Get the next defender clockwise from current player.
-        Search clockwise until we find a player on the defending team.
+        Get the next defender counterclockwise/right from current player.
+        Search counterclockwise/right until we find a player on the defending team.
         """
         phase = self.game.state['grandePhase']
         defending_team = phase['defendingTeam']
         defending_players = self.game.state['teams'][defending_team]['players']
         
-        # Start from next player clockwise
+        # Start from next player counterclockwise/right
         check_player = self._get_next_player_clockwise(current_player)
         
         # Find first defender
@@ -389,15 +389,15 @@ class GrandeBettingHandler:
     
     def _get_first_team_member_from_mano(self, team):
         """
-        Get the first team member clockwise from Mano.
+        Get the first team member counterclockwise/right from Mano.
         Used when finding who should respond after a raise.
         """
         team_players = self.game.state['teams'][team]['players']
         mano = self.game.state['manoIndex']
         
-        # Check in clockwise order starting from mano
+        # Check in counterclockwise/right order starting from mano
         for offset in range(4):
-            player = (mano + offset) % 4
+            player = (mano - offset) % 4
             if player in team_players:
                 return player
         

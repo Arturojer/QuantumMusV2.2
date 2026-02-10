@@ -359,15 +359,15 @@ class GenericBettingHandler:
 
     def _get_first_team_member_from_mano(self, team):
         """
-        Get the first team member clockwise from Mano.
+        Get the first team member counterclockwise/right from Mano.
         Used when finding who should respond after a raise.
         """
         team_players = self.game.state['teams'][team]['players']
         mano = self.game.state['manoIndex']
 
-        # Check in clockwise order starting from mano
+        # Check in counterclockwise/right order starting from mano
         for offset in range(4):
-            player = (mano + offset) % 4
+            player = (mano - offset) % 4
             if player in team_players:
                 return player
 

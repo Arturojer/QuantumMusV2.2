@@ -285,9 +285,15 @@ class QuantumMusGame:
         """Get opponent team"""
         return 'team2' if team == 'team1' else 'team1'
     
+    def get_next_player_index(self, current_index=None):
+        """Get next player index (counterclockwise/right in seating order)."""
+        if current_index is None:
+            current_index = self.state['activePlayerIndex']
+        return (current_index - 1) % self.num_players
+
     def next_player(self):
-        """Move to next player (clockwise in seating order)"""
-        self.state['activePlayerIndex'] = (self.state['activePlayerIndex'] + 1) % 4
+        """Move to next player (counterclockwise/right in seating order)."""
+        self.state['activePlayerIndex'] = self.get_next_player_index()
         return self.state['activePlayerIndex']
     
     def reset_round_state(self):
@@ -330,9 +336,9 @@ class QuantumMusGame:
         if self.state['currentRound'] not in ['MUS', 'GRANDE', 'CHICA', 'PARES', 'JUEGO']:
             logger.warning(f"Invalid round state before new hand: {self.state['currentRound']}")
         
-        # Rotate mano to next player (clockwise)
+        # Rotate mano to next player (counterclockwise/right)
         old_mano = self.state['manoIndex']
-        self.state['manoIndex'] = (self.state['manoIndex'] + 1) % 4
+        self.state['manoIndex'] = self.get_next_player_index(self.state['manoIndex'])
         self.state['activePlayerIndex'] = self.state['manoIndex']
         
         # Reset round state

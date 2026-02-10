@@ -49,10 +49,10 @@ def on_player_action(sid, data):
     grande_phase = {
         'currentBet': {'amount': data.get('data', {}).get('amount', 0), 'betType': action},
         'currentRound': 'GRANDE',
-        'activePlayerIndex': (player_index + 1) % 4
+        'activePlayerIndex': (player_index - 1) % 4
     }
     sio.emit('grande_phase_update', {'grande_phase': grande_phase}, room=None)
-    sio.emit('game_update', {'game_state': {'state': {'currentRound': 'GRANDE', 'activePlayerIndex': (player_index + 1) % 4}}}, room=None)
+    sio.emit('game_update', {'game_state': {'state': {'currentRound': 'GRANDE', 'activePlayerIndex': (player_index - 1) % 4}}}, room=None)
     return {'success': True}
 
 if __name__ == '__main__':

@@ -438,7 +438,7 @@ def handle_player_action(data):
         }, room=room_id)
         
         # Check if round ended
-        if result.get('round_ended'):
+        if result.get('round_ended') and result.get('round_result') is not None:
             socketio.emit('round_ended', {
                 'result': result['round_result']
             }, room=room_id)

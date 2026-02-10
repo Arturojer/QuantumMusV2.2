@@ -16,6 +16,37 @@ class RoundHandler:
     def __init__(self, game):
         self.game = game
         self.grande_handler = GrandeBettingHandler(game)
+
+    def _player_has_pares(self, player_index):
+        hand = self.game.hands.get(player_index, [])
+        value_counts = {}
+        for card in hand:
+            value = getattr(card, 'value', None)
+            if value is None and isinstance(card, dict):
+                value = card.get('value')
+            if value is None:
+                continue
+            value_counts[value] = value_counts.get(value, 0) + 1
+        return any(count >= 2 for count in value_counts.values())
+
+    def _is_player_eligible_for_round(self, player_index):
+        if self.game.state['currentRound'] != 'PARES':
+            return True
+        return self._player_has_pares(player_index)
+
+    def _get_next_player_in_turn(self, start_index, team=None, require_eligible=False, skipped=None):
+        skipped = skipped or set()
+        current_index = start_index
+        for _ in range(self.game.num_players):
+            current_index = self.game.get_next_player_index(current_index)
+            if team and current_index not in self.game.state['teams'][team]['players']:
+                continue
+            if require_eligible and not self._is_player_eligible_for_round(current_index):
+                continue
+            if current_index in skipped:
+                continue
+            return current_index
+        return None
     
     def handle_mus_round(self, player_index, action, extra_data=None):
         """Handle MUS round actions"""
@@ -110,6 +141,8 @@ class RoundHandler:
         normalized_action = action.lower()
         action_aliases = {
             'quiero': 'accept',
+            'no quiero': 'reject',
+            'noquiero': 'reject',
             'no_quiero': 'reject',
             'no-quiero': 'reject',
             're_envido': 'envido',
@@ -122,11 +155,19 @@ class RoundHandler:
         player_team = self.game.get_player_team(player_index)
         opponent_team = self.game.get_opponent_team(player_team)
         bet_active = bool(self.game.state['currentBet'].get('betType')) and bool(self.game.state['currentBet'].get('bettingTeam'))
+        self.game.state['currentBet'].setdefault('responses', {})
 
         if bet_active:
             # Only allow responses to an active bet
-            if normalized_action in ['mus', 'paso']:
+            if normalized_action == 'mus':
                 return {'success': False, 'error': 'Invalid action while bet is active'}
+
+            defending_team = opponent_team
+            if player_team != defending_team:
+                return {'success': False, 'error': 'Only defending team can respond to bet'}
+
+            if not self._is_player_eligible_for_round(player_index):
+                return {'success': False, 'error': 'Player not eligible to respond in this round'}
 
             if normalized_action == 'accept':
                 # Accept the bet (defer scoring except ordago)
@@ -137,6 +178,7 @@ class RoundHandler:
                     return self._reveal_and_score()
 
                 bet_amount = self.game.state['currentBet'].get('amount') or 1
+                self.game.state['currentBet']['responses'][player_index] = 'accept'
                 self.game.state['deferredResults'].append({
                     'round': self.game.state['currentRound'],
                     'betAmount': bet_amount,
@@ -156,7 +198,22 @@ class RoundHandler:
                     'hand_ended': hand_ended
                 }
 
-            if normalized_action == 'reject':
+            if normalized_action in ['reject', 'paso']:
+                self.game.state['currentBet']['responses'][player_index] = 'reject'
+                rejected = {
+                    p for p, response in self.game.state['currentBet']['responses'].items()
+                    if response == 'reject'
+                }
+                next_defender = self._get_next_player_in_turn(
+                    player_index,
+                    team=defending_team,
+                    require_eligible=True,
+                    skipped=rejected
+                )
+                if next_defender is not None:
+                    self.game.state['activePlayerIndex'] = next_defender
+                    return {'success': True, 'next_player': next_defender}
+
                 points = self.game.state['currentBet'].get('amount') or 1
                 winning_team = self.game.state['currentBet'].get('bettingTeam')
                 if winning_team:
@@ -182,7 +239,14 @@ class RoundHandler:
                 self.game.state['currentBet']['bettingTeam'] = player_team
                 self.game.state['currentBet']['betType'] = 'ordago' if normalized_action == 'ordago' else 'envido'
                 self.game.state['currentBet']['responses'] = {}
-                self.game.state['activePlayerIndex'] = (player_index + 1) % 4
+                next_defender = self._get_next_player_in_turn(
+                    player_index,
+                    team=self.game.get_opponent_team(player_team),
+                    require_eligible=True
+                )
+                if next_defender is None:
+                    return self._resolve_bet_rejection()
+                self.game.state['activePlayerIndex'] = next_defender
 
                 logger.info(f"Player {player_index} raised to {bet_amount} ({self.game.state['currentBet']['betType']})")
                 return {'success': True, 'bet_raised': True, 'bet_amount': bet_amount}
@@ -191,7 +255,14 @@ class RoundHandler:
 
         # No active bet: allow pass/check or initiate bet
         if normalized_action == 'paso':
-            self.game.next_player()
+            next_player = self._get_next_player_in_turn(
+                player_index,
+                require_eligible=self.game.state['currentRound'] == 'PARES'
+            )
+            if next_player is None:
+                hand_ended = self.game.move_to_next_round()
+                return {'success': True, 'round_ended': True, 'hand_ended': hand_ended}
+            self.game.state['activePlayerIndex'] = next_player
             return {'success': True}
 
         if normalized_action in ['envido', 'ordago']:
@@ -200,7 +271,14 @@ class RoundHandler:
             self.game.state['currentBet']['bettingTeam'] = player_team
             self.game.state['currentBet']['betType'] = 'ordago' if normalized_action == 'ordago' else 'envido'
             self.game.state['currentBet']['responses'] = {}
-            self.game.state['activePlayerIndex'] = (player_index + 1) % 4
+            next_defender = self._get_next_player_in_turn(
+                player_index,
+                team=opponent_team,
+                require_eligible=self.game.state['currentRound'] == 'PARES'
+            )
+            if next_defender is None:
+                return self._resolve_bet_rejection()
+            self.game.state['activePlayerIndex'] = next_defender
 
             logger.info(f"Player {player_index} bet {bet_amount} points ({self.game.state['currentBet']['betType']})")
             return {
@@ -211,6 +289,26 @@ class RoundHandler:
             }
 
         return {'success': False, 'error': 'Invalid action'}
+
+    def _resolve_bet_rejection(self):
+        points = self.game.state['currentBet'].get('amount') or 1
+        winning_team = self.game.state['currentBet'].get('bettingTeam')
+        if winning_team:
+            self.game.state['teams'][winning_team]['score'] += points
+
+        logger.info(f"{winning_team} wins {points} points (bet rejected)")
+        win_check = self.game.check_win_condition()
+        hand_ended = self.game.move_to_next_round()
+
+        return {
+            'success': True,
+            'round_ended': True,
+            'winner_team': winning_team,
+            'points': points,
+            'reason': 'Bet rejected',
+            'hand_ended': hand_ended,
+            **win_check
+        }
     
     def _reveal_and_score(self):
         """Reveal cards and determine winner"""
