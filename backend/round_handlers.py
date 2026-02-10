@@ -25,7 +25,7 @@ class RoundHandler:
             return {'success': False, 'error': 'Invalid player index'}
         
         # Validate action
-        valid_actions = ['mus', 'paso', 'envido', 'ordago']
+        valid_actions = ['mus', 'no_mus', 'cortar', 'paso', 'envido', 'ordago']
         if action not in valid_actions:
             logger.error(f"Invalid action: {action}")
             return {'success': False, 'error': f'Invalid action: {action}'}
@@ -41,43 +41,53 @@ class RoundHandler:
             return {'success': False, 'error': 'You have already acted this round'}
         
         self.game.state['roundActions'][player_index] = action
-        
+
         if action == 'mus':
             # Check if all players chose mus
             all_mus = (len(self.game.state['roundActions']) == 4 and
-                      all(a == 'mus' for a in self.game.state['roundActions'].values()))
-            
+                       all(a == 'mus' for a in self.game.state['roundActions'].values()))
+
             if all_mus:
                 # Start discard phase
                 self.game.state['waitingForDiscard'] = True
-                logger.info(f"All players chose MUS - starting discard phase")
-                
+                logger.info("All players chose MUS - starting discard phase")
+
                 return {
                     'success': True,
                     'discard_phase': True
                 }
-            else:
-                # Move to next player
-                self.game.next_player()
-                return {'success': True}
-        
-        elif action in ['paso', 'envido', 'ordago']:
-            # End MUS phase, move to GRANDE
+
+            # Move to next player until all 4 have spoken
+            self.game.next_player()
+            return {'success': True}
+
+        if action in ['no_mus', 'cortar', 'paso', 'envido', 'ordago']:
+            # End MUS phase immediately and move to GRANDE
             if action in ['envido', 'ordago']:
                 bet_amount = extra_data.get('amount', 2) if extra_data else 2
                 self.game.state['currentBet']['amount'] = bet_amount
                 self.game.state['currentBet']['betType'] = action
                 self.game.state['currentBet']['bettingTeam'] = self.game.get_player_team(player_index)
+                self.game.state['currentBet']['responses'] = {}
                 logger.info(f"Player {player_index} bet {bet_amount} points ({action})")
-            
+            else:
+                self.game.state['currentBet'] = {
+                    'amount': 0,
+                    'bettingTeam': None,
+                    'betType': None,
+                    'responses': {}
+                }
+
             self.game.state['musPhaseActive'] = False
             self.game.state['currentRound'] = 'GRANDE'
-            self.game.reset_round_state()
+            self.game.state['roundActions'] = {}
+            self.game.state['allPlayersPassed'] = False
+            self.game.state['waitingForDiscard'] = False
             self.game.state['activePlayerIndex'] = self.game.state['manoIndex']
-            
+
             # Initialize Grande phase
             self.grande_handler.initialize_grande_phase()
-            
+
             return {
                 'success': True,
                 'round_changed': True,
@@ -88,109 +98,118 @@ class RoundHandler:
     
     def handle_betting_round(self, player_index, action, extra_data=None):
         """Handle betting rounds (GRANDE, CHICA, PARES, JUEGO)"""
-        
-        # Use detailed Grande handler for GRANDE phase
-        if self.game.state['currentRound'] == 'GRANDE':
-            result = self.grande_handler.handle_action(player_index, action, extra_data)
-            
-            # If Grande phase ends, transition to next round (CHICA)
-            if result.get('success') and result.get('move_to_next_round'):
-                hand_ended = self.game.move_to_next_round()
-                result['hand_ended'] = hand_ended
-            
-            return result
-        
-        # Use legacy handler for other rounds (will be updated similarly later)
+
+        # Validate it's this player's turn
+        if self.game.state['activePlayerIndex'] != player_index:
+            logger.warning(f"Player {player_index} tried to act out of turn (active: {self.game.state['activePlayerIndex']})")
+            return {'success': False, 'error': 'Not your turn'}
+
+        if not isinstance(action, str):
+            return {'success': False, 'error': 'Invalid action'}
+
+        normalized_action = action.lower()
+        action_aliases = {
+            'quiero': 'accept',
+            'no_quiero': 'reject',
+            'no-quiero': 'reject',
+            're_envido': 'envido',
+            're-envido': 'envido',
+            'reenvido': 'envido',
+            'raise': 'envido'
+        }
+        normalized_action = action_aliases.get(normalized_action, normalized_action)
+
         player_team = self.game.get_player_team(player_index)
         opponent_team = self.game.get_opponent_team(player_team)
-        
-        if action == 'paso':
-            # Player passes
-            self.game.state['currentBet']['responses'][player_index] = 'paso'
-            
-            # Check if entire opponent team passed
-            opponent_players = self.game.state['teams'][opponent_team]['players']
-            all_opponents_responded = all(
-                p in self.game.state['currentBet']['responses']
-                for p in opponent_players
-            )
-            
-            if all_opponents_responded:
-                all_passed = all(
-                    self.game.state['currentBet']['responses'].get(p) == 'paso'
-                    for p in opponent_players
-                )
-                
-                if all_passed:
-                    # Betting team wins
-                    if self.game.state['currentBet']['bettingTeam']:
-                        points = self.game.state['currentBet']['amount'] or 1
-                        self.game.state['teams'][self.game.state['currentBet']['bettingTeam']]['score'] += points
-                        
-                        logger.info(f"{self.game.state['currentBet']['bettingTeam']} wins {points} points")
-                        
-                        # Move to next round
-                        hand_ended = self.game.move_to_next_round()
-                        
-                        return {
-                            'success': True,
-                            'round_ended': True,
-                            'winner_team': self.game.state['currentBet']['bettingTeam'],
-                            'points': points,
-                            'hand_ended': hand_ended
-                        }
-            
-            # Move to next player
+        bet_active = bool(self.game.state['currentBet'].get('betType')) and bool(self.game.state['currentBet'].get('bettingTeam'))
+
+        if bet_active:
+            # Only allow responses to an active bet
+            if normalized_action in ['mus', 'paso']:
+                return {'success': False, 'error': 'Invalid action while bet is active'}
+
+            if normalized_action == 'accept':
+                # Accept the bet (defer scoring except ordago)
+                if self.game.state['currentBet'].get('betType') == 'ordago':
+                    if self.game.state['currentRound'] not in ['GRANDE', 'CHICA']:
+                        return {'success': False, 'error': 'Ordago resolution not supported in this round'}
+                    self.game.state['currentBet']['amount'] = self.game.state['currentBet'].get('amount') or 40
+                    return self._reveal_and_score()
+
+                bet_amount = self.game.state['currentBet'].get('amount') or 1
+                self.game.state['deferredResults'].append({
+                    'round': self.game.state['currentRound'],
+                    'betAmount': bet_amount,
+                    'betType': self.game.state['currentBet'].get('betType') or 'envido',
+                    'bettingTeam': self.game.state['currentBet'].get('bettingTeam'),
+                    'defendingTeam': player_team,
+                    'comparison': 'deferred'
+                })
+
+                hand_ended = self.game.move_to_next_round()
+                return {
+                    'success': True,
+                    'round_ended': True,
+                    'bet_accepted': True,
+                    'bet_amount': bet_amount,
+                    'comparison_deferred': True,
+                    'hand_ended': hand_ended
+                }
+
+            if normalized_action == 'reject':
+                points = self.game.state['currentBet'].get('amount') or 1
+                winning_team = self.game.state['currentBet'].get('bettingTeam')
+                if winning_team:
+                    self.game.state['teams'][winning_team]['score'] += points
+
+                logger.info(f"{winning_team} wins {points} points (bet rejected)")
+                win_check = self.game.check_win_condition()
+                hand_ended = self.game.move_to_next_round()
+
+                return {
+                    'success': True,
+                    'round_ended': True,
+                    'winner_team': winning_team,
+                    'points': points,
+                    'reason': 'Bet rejected',
+                    'hand_ended': hand_ended,
+                    **win_check
+                }
+
+            if normalized_action in ['envido', 'ordago']:
+                bet_amount = 40 if normalized_action == 'ordago' else (extra_data.get('amount', self.game.state['currentBet'].get('amount', 2) + 2) if extra_data else self.game.state['currentBet'].get('amount', 2) + 2)
+                self.game.state['currentBet']['amount'] = bet_amount
+                self.game.state['currentBet']['bettingTeam'] = player_team
+                self.game.state['currentBet']['betType'] = 'ordago' if normalized_action == 'ordago' else 'envido'
+                self.game.state['currentBet']['responses'] = {}
+                self.game.state['activePlayerIndex'] = (player_index + 1) % 4
+
+                logger.info(f"Player {player_index} raised to {bet_amount} ({self.game.state['currentBet']['betType']})")
+                return {'success': True, 'bet_raised': True, 'bet_amount': bet_amount}
+
+            return {'success': False, 'error': 'Invalid response action'}
+
+        # No active bet: allow pass/check or initiate bet
+        if normalized_action == 'paso':
             self.game.next_player()
             return {'success': True}
-        
-        elif action == 'accept':
-            # Accept bet
-            self.game.state['currentBet']['responses'][player_index] = 'accept'
-            
-            # Check if team responded
-            opponent_players = self.game.state['teams'][opponent_team]['players']
-            all_responded = all(
-                p in self.game.state['currentBet']['responses']
-                for p in opponent_players
-            )
-            
-            if all_responded:
-                # Reveal and score
-                result = self._reveal_and_score()
-                return result
-            else:
-                self.game.next_player()
-                return {'success': True}
-        
-        elif action == 'envido' or action == 'raise':
-            # Raise bet
-            bet_amount = extra_data.get('amount', 2) if extra_data else 2
+
+        if normalized_action in ['envido', 'ordago']:
+            bet_amount = 40 if normalized_action == 'ordago' else (extra_data.get('amount', 2) if extra_data else 2)
             self.game.state['currentBet']['amount'] = bet_amount
             self.game.state['currentBet']['bettingTeam'] = player_team
-            self.game.state['currentBet']['betType'] = 'envido'
+            self.game.state['currentBet']['betType'] = 'ordago' if normalized_action == 'ordago' else 'envido'
             self.game.state['currentBet']['responses'] = {}
-            
-            # Opponent must respond
-            opponent_players = self.game.state['teams'][opponent_team]['players']
-            self.game.state['activePlayerIndex'] = opponent_players[0]
-            
-            logger.info(f"Player {player_index} raised to {bet_amount}")
-            return {'success': True}
-        
-        elif action == 'ordago':
-            # All-in
-            self.game.state['currentBet']['betType'] = 'ordago'
-            self.game.state['currentBet']['bettingTeam'] = player_team
-            self.game.state['currentBet']['amount'] = 40  # Win the game
-            self.game.state['currentBet']['responses'] = {}
-            
-            opponent_players = self.game.state['teams'][opponent_team]['players']
-            self.game.state['activePlayerIndex'] = opponent_players[0]
-            
-            logger.info(f"Player {player_index} went ORDAGO!")
-            return {'success': True}
-        
+            self.game.state['activePlayerIndex'] = (player_index + 1) % 4
+
+            logger.info(f"Player {player_index} bet {bet_amount} points ({self.game.state['currentBet']['betType']})")
+            return {
+                'success': True,
+                'bet_placed': True,
+                'bet_amount': bet_amount,
+                'betting_team': player_team
+            }
+
         return {'success': False, 'error': 'Invalid action'}
     
     def _reveal_and_score(self):

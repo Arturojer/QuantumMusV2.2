@@ -371,17 +371,195 @@ class QuantumMusGame:
         Called after JUEGO phase completes.
         """
         logger.info("Resolving deferred comparisons for all phases...")
-        
-        # Resolve Grande if deferred
-        if self.state['grandePhase'] and self.state['grandePhase'].get('result'):
-            if self.state['grandePhase']['result'].get('comparison') == 'deferred':
-                result = self.round_handler.grande_handler.compare_and_resolve_grande()
-                if result:
-                    logger.info(f"Grande resolved: {result['winner']} wins {result['points']} points")
-        
-        # TODO: Add Chica, Pares, Juego deferred comparisons when those handlers are implemented
-        
+        result = self.calculate_final_scores()
         logger.info("All deferred comparisons resolved.")
+        return result
+
+    def calculate_final_scores(self):
+        """
+        Resolve pending bets in order: Grande -> Chica -> Pares -> Juego -> Punto.
+        Pares/Juego only score teams with at least one player who declared yes.
+        """
+        from card_deck import get_highest_card, get_lowest_card, compare_cards
+
+        results = []
+        deferred = self.state.get('deferredResults') or []
+
+        def get_pending_bet(round_name):
+            for item in deferred:
+                if item.get('round') == round_name and not item.get('resolved'):
+                    item['resolved'] = True
+                    return item.get('betAmount', 1)
+
+            phase_key = {
+                'GRANDE': 'grandePhase',
+                'CHICA': 'chicaPhase',
+                'PARES': 'paresPhase',
+                'JUEGO': 'juegoPhase'
+            }.get(round_name)
+            phase = self.state.get(phase_key)
+            if phase and phase.get('result'):
+                phase_result = phase['result']
+                if phase_result.get('comparison') == 'deferred' and not phase_result.get('resolved'):
+                    phase_result['resolved'] = True
+                    return phase_result.get('betAmount', 1)
+
+            return None
+
+        def get_team_cards(team_players):
+            cards = []
+            for player_idx in team_players:
+                cards.extend([card.to_dict() for card in self.hands.get(player_idx, [])])
+            return cards
+
+        def get_declarations(round_name):
+            key = 'paresDeclarations' if round_name == 'PARES' else 'juegoDeclarations'
+            return self.state.get(key) or {}
+
+        def eligible_team_players(round_name, team):
+            declarations = get_declarations(round_name)
+            team_players = self.state['teams'][team]['players']
+            eligible = [p for p in team_players if declarations.get(p) is True]
+            return eligible
+
+        def calculate_pares(cards):
+            game_mode = self.game_mode
+            value_counts = {}
+            for card in cards:
+                value = card['value']
+                value_counts[value] = value_counts.get(value, 0) + 1
+
+            counts = sorted(value_counts.values(), reverse=True)
+            values = list(value_counts.keys())
+
+            if len(counts) > 0 and counts[0] == 3:
+                triplet_value = next(v for v in values if value_counts[v] == 3)
+                return {'rank': 2, 'values': [triplet_value]}
+            if len(counts) > 1 and counts[0] == 2 and counts[1] == 2:
+                order = ['A', '2', '4', '5', '6', '7', 'J', 'Q', 'K'] if game_mode == '8' else ['A', '2', '3', '4', '5', '6', '7', 'J', 'Q', 'K']
+                pair_values = [v for v in values if value_counts[v] == 2]
+                pair_values.sort(key=lambda x: order.index(x) if x in order else -1, reverse=True)
+                return {'rank': 3, 'values': pair_values}
+            if len(counts) > 0 and counts[0] == 2:
+                pair_value = next(v for v in values if value_counts[v] == 2)
+                return {'rank': 1, 'values': [pair_value]}
+
+            return {'rank': 0, 'values': []}
+
+        def calculate_juego(cards):
+            def get_card_points(val):
+                if val == 'A':
+                    return 1
+                if val == '2':
+                    return 1
+                if val == '3':
+                    return 3 if self.game_mode == '4' else 10
+                if val in ['J', 'Q', 'K']:
+                    return 10
+                try:
+                    return int(val)
+                except ValueError:
+                    return 0
+
+            sum_points = sum(get_card_points(card['value']) for card in cards)
+            return {'sum': sum_points, 'hasJuego': sum_points >= 31}
+
+        def award_points(winner_team, points, round_name):
+            if winner_team:
+                self.state['teams'][winner_team]['score'] += points
+                results.append({'round': round_name, 'winner': winner_team, 'points': points})
+
+        # GRANDE
+        bet_amount = get_pending_bet('GRANDE') or 1
+        team1_cards = get_team_cards(self.state['teams']['team1']['players'])
+        team2_cards = get_team_cards(self.state['teams']['team2']['players'])
+        team1_best = get_highest_card(team1_cards, self.game_mode)
+        team2_best = get_highest_card(team2_cards, self.game_mode)
+        result = compare_cards(
+            team1_best['value'] if team1_best else 'A',
+            team2_best['value'] if team2_best else 'A',
+            self.game_mode
+        )
+        if result > 0:
+            award_points('team1', bet_amount, 'GRANDE')
+        elif result < 0:
+            award_points('team2', bet_amount, 'GRANDE')
+        else:
+            award_points(self.get_player_team(self.state['manoIndex']), bet_amount, 'GRANDE')
+
+        # CHICA
+        bet_amount = get_pending_bet('CHICA') or 1
+        team1_best = get_lowest_card(team1_cards, self.game_mode)
+        team2_best = get_lowest_card(team2_cards, self.game_mode)
+        result = compare_cards(
+            team1_best['value'] if team1_best else 'K',
+            team2_best['value'] if team2_best else 'K',
+            self.game_mode,
+            lower_wins=True
+        )
+        if result > 0:
+            award_points('team1', bet_amount, 'CHICA')
+        elif result < 0:
+            award_points('team2', bet_amount, 'CHICA')
+        else:
+            award_points(self.get_player_team(self.state['manoIndex']), bet_amount, 'CHICA')
+
+        # PARES
+        bet_amount = get_pending_bet('PARES') or 1
+        team1_eligible = eligible_team_players('PARES', 'team1')
+        team2_eligible = eligible_team_players('PARES', 'team2')
+        if team1_eligible or team2_eligible:
+            team1_pares = calculate_pares(get_team_cards(team1_eligible))
+            team2_pares = calculate_pares(get_team_cards(team2_eligible))
+            if team1_pares['rank'] > team2_pares['rank']:
+                award_points('team1', bet_amount, 'PARES')
+            elif team2_pares['rank'] > team1_pares['rank']:
+                award_points('team2', bet_amount, 'PARES')
+            else:
+                team1_high = max(team1_pares['values']) if team1_pares['values'] else ''
+                team2_high = max(team2_pares['values']) if team2_pares['values'] else ''
+                if team1_high > team2_high:
+                    award_points('team1', bet_amount, 'PARES')
+                elif team2_high > team1_high:
+                    award_points('team2', bet_amount, 'PARES')
+                else:
+                    award_points(self.get_player_team(self.state['manoIndex']), bet_amount, 'PARES')
+
+        # JUEGO or PUNTO
+        bet_amount = get_pending_bet('JUEGO') or 1
+        team1_eligible = eligible_team_players('JUEGO', 'team1')
+        team2_eligible = eligible_team_players('JUEGO', 'team2')
+        if team1_eligible or team2_eligible:
+            if team1_eligible and not team2_eligible:
+                award_points('team1', bet_amount, 'JUEGO')
+            elif team2_eligible and not team1_eligible:
+                award_points('team2', bet_amount, 'JUEGO')
+            else:
+                team1_juego = calculate_juego(get_team_cards(team1_eligible))
+                team2_juego = calculate_juego(get_team_cards(team2_eligible))
+                if team1_juego['sum'] > team2_juego['sum']:
+                    award_points('team1', bet_amount, 'JUEGO')
+                elif team2_juego['sum'] > team1_juego['sum']:
+                    award_points('team2', bet_amount, 'JUEGO')
+                else:
+                    award_points(self.get_player_team(self.state['manoIndex']), bet_amount, 'JUEGO')
+        else:
+            # Punto: no team declared juego
+            bet_amount = get_pending_bet('PUNTO') or 1
+            team1_punto = calculate_juego(team1_cards)
+            team2_punto = calculate_juego(team2_cards)
+            if team1_punto['sum'] > team2_punto['sum']:
+                award_points('team1', bet_amount, 'PUNTO')
+            elif team2_punto['sum'] > team1_punto['sum']:
+                award_points('team2', bet_amount, 'PUNTO')
+            else:
+                award_points(self.get_player_team(self.state['manoIndex']), bet_amount, 'PUNTO')
+
+        win_check = self.check_win_condition()
+        return {
+            'results': results,
+            **win_check
+        }
     
     def check_win_condition(self):
         """Check if any team has won"""
