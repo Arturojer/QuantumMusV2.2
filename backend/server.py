@@ -1,3 +1,9 @@
+try:
+    import eventlet
+    eventlet.monkey_patch()
+except Exception:
+    eventlet = None
+
 """
 Quantum Mus - Backend Server
 Flask + Socket.IO for real-time multiplayer game
@@ -11,53 +17,13 @@ import os
 from datetime import datetime
 import time
 
-# Prefer eventlet for better WebSocket support and lower latency under limited CPU
-try:
-    import eventlet
-    eventlet.monkey_patch()
-except Exception:
-    eventlet = None
-
 # Directorio del frontend (para servir archivos estáticos si aplica)
 FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'frontend'))
 
 # CORS: orígenes permitidos
-# En producción (Render), especificar ALLOWED_ORIGINS con dominios explícitos
+# En producción, especificar ALLOWED_ORIGINS con dominios explícitos
 # En desarrollo, usar * para pruebas locales
-def _get_cors_origins():
-    allowed = os.environ.get('ALLOWED_ORIGINS', '').strip()
-    frontend_url = os.environ.get('FRONTEND_URL', '').strip()
-    frontend_origin = os.environ.get('FRONTEND_ORIGIN', '').strip()
-    local_origins = [
-        'https://quantum-mus-backend.onrender.com'
-    ]
-
-    if allowed:
-        # Usar lista explícita si se proporciona
-        origins = [o.strip() for o in allowed.split(',') if o.strip()]
-        origins.extend(local_origins)
-        return origins
-
-    extra_origins = [o for o in [frontend_url, frontend_origin] if o]
-
-    # Detectar si está en producción (Render establece esta variable)
-    if os.environ.get('RENDER') == 'true':
-        # En Render: permitir solo el dominio de producción y el frontend explícito
-        render_domain = os.environ.get('RENDER_EXTERNAL_HOSTNAME', '')
-        origins = []
-        if render_domain:
-            origins.extend([f'https://{render_domain}', f'https://www.{render_domain}'])
-        origins.extend(extra_origins)
-        origins.extend(local_origins)
-        if origins:
-            return origins
-        # Fallback seguro si no hay dominio configurado
-        return ['https://quantum-mus-backend.onrender.com']
-
-    # En desarrollo local, permitir todos los orígenes
-    return '*'
-
-CORS_ORIGINS = _get_cors_origins()
+CORS_ORIGINS = os.environ.get('ALLOWED_ORIGINS', '*')
 
 # Import game modules
 from game_manager import GameManager
