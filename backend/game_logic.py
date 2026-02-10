@@ -188,18 +188,18 @@ class QuantumMusGame:
                 # First, deal from remaining deck
                 deck_remaining = len(self.deck.cards)
                 if deck_remaining >= num_new:
-                    new_cards = self.deck.deal(num_new)
+                    new_cards = self.deck.draw(num_new)
                 else:
                     # Not enough cards: deal what remains, then reshuffle discards and deal the rest
                     if deck_remaining > 0:
-                        new_cards = self.deck.deal(deck_remaining)
+                        new_cards = self.deck.draw(deck_remaining)
                     # Reshuffle discards into deck
                     if discarded_cards:
                         self.deck.cards.extend(discarded_cards)
                         self.deck.shuffle()
                         discarded_cards = []  # Only reshuffle once
                         needed = num_new - len(new_cards)
-                        new_cards.extend(self.deck.deal(needed))
+                        new_cards.extend(self.deck.draw(needed))
                 if not new_cards or len(new_cards) != num_new:
                     logger.error(f"Failed to deal {num_new} cards to player {player_idx}")
                     return {'success': False, 'error': f'Insufficient cards in deck after reshuffling discards'}
