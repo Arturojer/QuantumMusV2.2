@@ -81,11 +81,13 @@ class RoundHandler:
             if all_mus:
                 # Start discard phase
                 self.game.state['waitingForDiscard'] = True
+                self.game.state['roundActions'] = {}
                 logger.info("All players chose MUS - starting discard phase")
 
                 return {
                     'success': True,
-                    'discard_phase': True
+                    'discard_phase': True,
+                    'waiting_for_discard': True
                 }
 
             # Move to next player until all 4 have spoken

@@ -102,6 +102,7 @@ class QuantumMusGame:
         self.deck = QuantumDeck()
         self.deck.shuffle()
         self.hands = {i: [] for i in range(4)}
+        self.discard_pile = []
         
         # Round handler
         self.round_handler = RoundHandler(self)
@@ -122,6 +123,7 @@ class QuantumMusGame:
         # Always reset deck to 40 cards at the start of a new hand/game
         self.deck = QuantumDeck()
         self.deck.shuffle()
+        self.discard_pile = []
         cards_needed = 4 * self.num_players
         try:
             for player_idx in range(self.num_players):
@@ -163,43 +165,28 @@ class QuantumMusGame:
             logger.warning(f"deal_new_cards called with only {len(self.state['cardsDiscarded'])}/{self.num_players} players ready")
             return {'success': False, 'error': f'Not all players ready: {len(self.state["cardsDiscarded"])}' + f'/{self.num_players}'}
 
-        # Gather all discarded cards to allow reshuffling if needed
-        discarded_cards = []
         try:
-            for player_idx, card_indices in self.state['cardsDiscarded'].items():
-                # Validate card indices
-                if not isinstance(card_indices, list) or len(card_indices) > 4:
-                    logger.error(f"Invalid discard for player {player_idx}: {card_indices}")
-                    return {'success': False, 'error': f'Invalid card indices for player {player_idx}'}
-
-                # Remove old cards (in reverse order to maintain proper indices)
-                player_discards = []
-                for idx in sorted(card_indices, reverse=True):
-                    if idx < len(self.hands[player_idx]):
-                        player_discards.append(self.hands[player_idx].pop(idx))
-                    else:
-                        logger.warning(f"Card index {idx} out of range for player {player_idx}")
-                discarded_cards.extend(player_discards)
+            def _draw_from_deck(num_cards):
+                if num_cards <= 0:
+                    return []
+                try:
+                    return self.deck.draw(num_cards)
+                except Exception:
+                    if not self.discard_pile:
+                        return []
+                    remaining = self.deck.cards[self.deck.deck_index:]
+                    self.deck.cards = remaining + self.discard_pile
+                    self.deck.shuffle()
+                    self.discard_pile.clear()
+                    try:
+                        return self.deck.draw(num_cards)
+                    except Exception:
+                        return []
 
             # Now deal new cards, using leftover deck, then discards if needed
             for player_idx, card_indices in self.state['cardsDiscarded'].items():
                 num_new = len(card_indices)
-                new_cards = []
-                # First, deal from remaining deck
-                deck_remaining = len(self.deck.cards)
-                if deck_remaining >= num_new:
-                    new_cards = self.deck.draw(num_new)
-                else:
-                    # Not enough cards: deal what remains, then reshuffle discards and deal the rest
-                    if deck_remaining > 0:
-                        new_cards = self.deck.draw(deck_remaining)
-                    # Reshuffle discards into deck
-                    if discarded_cards:
-                        self.deck.cards.extend(discarded_cards)
-                        self.deck.shuffle()
-                        discarded_cards = []  # Only reshuffle once
-                        needed = num_new - len(new_cards)
-                        new_cards.extend(self.deck.draw(needed))
+                new_cards = _draw_from_deck(num_new)
                 if not new_cards or len(new_cards) != num_new:
                     logger.error(f"Failed to deal {num_new} cards to player {player_idx}")
                     return {'success': False, 'error': f'Insufficient cards in deck after reshuffling discards'}
@@ -235,12 +222,27 @@ class QuantumMusGame:
         """Handle card discard during MUS phase"""
         if not self.state['waitingForDiscard']:
             return {'success': False, 'error': 'Not in discard phase'}
+
+        if player_index in self.state['cardsDiscarded']:
+            return {'success': False, 'error': 'Player already discarded'}
+
+        if not isinstance(card_indices, list) or len(card_indices) > 4:
+            return {'success': False, 'error': 'Invalid discard indices'}
+
+        player_hand = self.hands.get(player_index, [])
+        if any(not isinstance(idx, int) or idx < 0 or idx >= len(player_hand) for idx in card_indices):
+            return {'success': False, 'error': 'Discard index out of range'}
+
+        player_discards = []
+        for idx in sorted(card_indices, reverse=True):
+            player_discards.append(player_hand.pop(idx))
+        self.discard_pile.extend(player_discards)
         
         # Record discarded cards
         self.state['cardsDiscarded'][player_index] = card_indices
         
         # Check if all players have discarded
-        all_discarded = len(self.state['cardsDiscarded']) == 4
+        all_discarded = len(self.state['cardsDiscarded']) == self.num_players
         
         return {
             'success': True,

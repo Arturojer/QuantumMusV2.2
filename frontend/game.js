@@ -857,6 +857,17 @@ function initGame() {
           gameState.teams.team2.score = st.teams.team2?.score ?? 0;
         }
         gameState.currentBet = st.currentBet || gameState.currentBet;
+        const previousWaiting = gameState.waitingForDiscard;
+        gameState.waitingForDiscard = !!st.waitingForDiscard;
+        if (gameState.waitingForDiscard) {
+          gameState.roundActions = {};
+          if (!gameState.cardsDiscarded || !gameState.cardsDiscarded[0]) {
+            showDiscardUI();
+          }
+        } else if (previousWaiting) {
+          const discardBtn = document.getElementById('discard-button');
+          if (discardBtn) discardBtn.remove();
+        }
         // If server included declaration-phase metadata, apply it
         try {
           const declRes = data.declaration_result;
