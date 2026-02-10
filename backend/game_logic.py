@@ -32,23 +32,46 @@ class QuantumMusGame:
         elif len(players) > 4:
             logger.warning(f"Game designed for 4 players, got {len(players)} (extras may not have teams)")
         
+        # Seating plan: interleave teams when possible
+        team1_players = [p for p in self.players if p.get('team') == 1]
+        team2_players = [p for p in self.players if p.get('team') == 2]
+        unassigned_players = [p for p in self.players if p.get('team') not in (1, 2)]
+
+        if team1_players and team2_players:
+            interleaved_players = []
+            max_len = max(len(team1_players), len(team2_players))
+            for idx in range(max_len):
+                if idx < len(team1_players):
+                    interleaved_players.append(team1_players[idx])
+                if idx < len(team2_players):
+                    interleaved_players.append(team2_players[idx])
+            if unassigned_players:
+                interleaved_players.extend(unassigned_players)
+            self.players = interleaved_players
         # Store actual number of players for dynamic calculations
-        self.num_players = len(players)
+        self.num_players = len(self.players)
         
         # Build teams from lobby data if not provided explicitly
         if teams is None:
-            # Derive from player 'team' field (1 = Copenhaguen, 2 = Bohmian)
-            team1_indices = [i for i, p in enumerate(players) if p.get('team') == 1]
-            team2_indices = [i for i, p in enumerate(players) if p.get('team') == 2]
-            # Fallback to classic intercalated seating if team info missing
-            if len(team1_indices) != 2 or len(team2_indices) != 2:
-                logger.warning(f"Could not derive teams from player data, using default [0,2]/[1,3]")
-                team1_indices = [0, 2]
-                team2_indices = [1, 3]
             teams = {
-                'team1': {'players': team1_indices, 'score': 0, 'name': 'Copenhaguen'},
-                'team2': {'players': team2_indices, 'score': 0, 'name': 'Bohmian'}
+                'team1': {'players': [], 'score': 0, 'name': 'Copenhaguen'},
+                'team2': {'players': [], 'score': 0, 'name': 'Bohmian'}
             }
+
+        team1_indices = [i for i in range(self.num_players) if i % 2 == 0]
+        team2_indices = [i for i in range(self.num_players) if i % 2 == 1]
+        teams = {
+            'team1': {
+                'players': team1_indices,
+                'score': teams.get('team1', {}).get('score', 0),
+                'name': teams.get('team1', {}).get('name', 'Copenhaguen')
+            },
+            'team2': {
+                'players': team2_indices,
+                'score': teams.get('team2', {}).get('score', 0),
+                'name': teams.get('team2', {}).get('name', 'Bohmian')
+            }
+        }
         logger.info(f"Teams for room {room_id}: team1={teams['team1']['players']}, team2={teams['team2']['players']}")
         
         # Game state
@@ -263,8 +286,8 @@ class QuantumMusGame:
         return 'team2' if team == 'team1' else 'team1'
     
     def next_player(self):
-        """Move to next player (counter-clockwise)"""
-        self.state['activePlayerIndex'] = (self.state['activePlayerIndex'] + 3) % 4
+        """Move to next player (clockwise in seating order)"""
+        self.state['activePlayerIndex'] = (self.state['activePlayerIndex'] + 1) % 4
         return self.state['activePlayerIndex']
     
     def reset_round_state(self):
