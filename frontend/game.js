@@ -4,6 +4,19 @@ let gameInitialized = false;
 let timerInterval = null; // Global timer reference
 let aiDecisionTimeout = null; // Track AI decision timeout to prevent duplicates
 
+function mapBackendCardToFrontend(cardData) {
+  const suitMap = {
+    oro: 'oros',
+    copa: 'copas',
+    espada: 'espadas',
+    basto: 'bastos'
+  };
+  const rawSuit = (cardData && typeof cardData.palo !== 'undefined') ? String(cardData.palo).toLowerCase() : '';
+  const suit = suitMap[rawSuit] || suitMap[rawSuit.replace(/s$/, '')] || rawSuit;
+  const value = cardData ? cardData.valor : undefined;
+  return { value, suit };
+}
+
 // Export gameInitialized so it can be reset from navigation.js
 Object.defineProperty(window, 'gameInitialized', {
   get: () => gameInitialized,
@@ -740,9 +753,10 @@ function initGame() {
         const isTeammate = localIdx === 2;
         const hand = mappedHands[localIdx] || [];
         hand.forEach((card, i) => {
-          const suit = card.suit || 'oros';
+          const mappedCard = mapBackendCardToFrontend(card);
+          const suit = mappedCard.suit || 'oros';
           const map = suitMap[suit] || suitMap.oros;
-          const cardEl = createCard(card.value, map[0], map[1], i, isCurrentPlayer, isTeammate, map[2], localIdx, gameMode);
+          const cardEl = createCard(mappedCard.value, map[0], map[1], i, isCurrentPlayer, isTeammate, map[2], localIdx, gameMode);
           if (cardEl) cardsRow.appendChild(cardEl);
         });
       }
@@ -805,8 +819,9 @@ function initGame() {
         console.warn('[ONLINE] No hand found for local player, using fallback empty hand');
       }
       hand.forEach((c, i) => {
-        const s = suitMap[c.suit] || suitMap.oros;
-        const card = createCard(c.value, s[0], s[1], i, true, false, s[2], 0, gameMode);
+        const mappedCard = mapBackendCardToFrontend(c);
+        const s = suitMap[mappedCard.suit] || suitMap.oros;
+        const card = createCard(mappedCard.value, s[0], s[1], i, true, false, s[2], 0, gameMode);
         if (card) handContainer.appendChild(card);
       });
     });
