@@ -162,7 +162,7 @@ class RoundHandler:
             if normalized_action == 'mus':
                 return {'success': False, 'error': 'Invalid action while bet is active'}
 
-            defending_team = opponent_team
+            defending_team = self.game.get_opponent_team(self.game.state['currentBet'].get('bettingTeam'))
             if player_team != defending_team:
                 return {'success': False, 'error': 'Only defending team can respond to bet'}
 
