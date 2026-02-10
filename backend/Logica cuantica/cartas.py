@@ -132,3 +132,12 @@ class QuantumCard:
         if self.measured_state:
             return f"{self.get_valor()} de {self.get_palo()}"
         return f"Carta(id={self.card_id})"
+
+    def to_dict(self) -> dict:
+        return {
+            'palo': self.palo,
+            'valor': self.valor,
+            'card_id': self.card_id,
+            'measured_state': self.measured_state,
+            'repr': str(self)
+        }
