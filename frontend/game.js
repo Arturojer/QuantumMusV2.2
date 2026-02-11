@@ -2318,9 +2318,10 @@ function initGame() {
     } else if (action === 'accept') {
       gameState.currentBet.responses[playerIndex] = 'accept';
       
-      // Collapse cards immediately when accepting bet in PARES or JUEGO rounds
+      // Collapse cards immediately when accepting bet in PARES, JUEGO, or PUNTO rounds
       const isParesBetting = gameState.currentRound === 'PARES' && gameState.paresDeclarations;
       const isJuegoBetting = (gameState.currentRound === 'JUEGO') && gameState.juegoDeclarations;
+      const isPuntoBetting = gameState.currentRound === 'PUNTO';
       
       if (isParesBetting) {
         // Player is accepting bet in PARES - collapse cards with animation
@@ -2334,7 +2335,7 @@ function initGame() {
           }, 100);
         }
       } else if (isJuegoBetting) {
-        // Player is accepting bet in JUEGO/PUNTO - collapse cards with animation
+        // Player is accepting bet in JUEGO - collapse cards with animation
         console.log(`[BET ACCEPT] Player ${playerIndex + 1} accepting in JUEGO - collapsing cards`);
         collapseOnBetAcceptance(playerIndex, 'JUEGO');
         
@@ -2344,6 +2345,15 @@ function initGame() {
             checkPredictionPenalty(playerIndex, 'JUEGO', true);
           }, 100);
         }
+      } else if (isPuntoBetting) {
+        // Player is accepting bet in PUNTO - collapse cards with animation
+        console.log(`[BET ACCEPT] Player ${playerIndex + 1} accepting in PUNTO - collapsing cards`);
+        collapseOnBetAcceptance(playerIndex, 'PUNTO');
+        
+        // Check penalty after collapse (can still be penalized if had JUEGO)
+        setTimeout(() => {
+          checkPredictionPenalty(playerIndex, 'PUNTO', true);
+        }, 100);
       }
       
       if (gameState.currentBet.betType === 'ordago') {
@@ -2374,6 +2384,7 @@ function initGame() {
       // Collapse cards immediately when placing bet in PARES or JUEGO rounds
       const isParesBetting = gameState.currentRound === 'PARES' && gameState.paresDeclarations;
       const isJuegoBetting = (gameState.currentRound === 'JUEGO') && gameState.juegoDeclarations;
+      const isPuntoBetting = gameState.currentRound === 'PUNTO';
       
       if (isParesBetting) {
         // Player is placing bet in PARES - collapse cards with animation
@@ -2387,7 +2398,7 @@ function initGame() {
           }, 100);
         }
       } else if (isJuegoBetting) {
-        // Player is placing bet in JUEGO/PUNTO - collapse cards with animation
+        // Player is placing bet in JUEGO - collapse cards with animation
         console.log(`[BET PLACE] Player ${playerIndex + 1} betting in JUEGO - collapsing cards`);
         collapseOnBetAcceptance(playerIndex, 'JUEGO');
         
@@ -2397,6 +2408,15 @@ function initGame() {
             checkPredictionPenalty(playerIndex, 'JUEGO', true);
           }, 100);
         }
+      } else if (isPuntoBetting) {
+        // Player is placing bet in PUNTO - collapse cards with animation
+        console.log(`[BET PLACE] Player ${playerIndex + 1} betting in PUNTO - collapsing cards`);
+        collapseOnBetAcceptance(playerIndex, 'PUNTO');
+        
+        // Check penalty after collapse (can still be penalized if had JUEGO)
+        setTimeout(() => {
+          checkPredictionPenalty(playerIndex, 'PUNTO', true);
+        }, 100);
       }
       
       const isRaise = gameState.currentBet.bettingTeam && gameState.currentBet.bettingTeam !== playerTeam;
@@ -3731,74 +3751,93 @@ function initGame() {
   }
   
   function handleAllJuegoDeclarationsDone() {
-    // Count declarations per team
-    const team1JuegoCount = gameState.teams.team1.players.filter(p => gameState.juegoDeclarations[p] === true).length;
-    const team2JuegoCount = gameState.teams.team2.players.filter(p => gameState.juegoDeclarations[p] === true).length;
+    // Count declarations per team (similar to PARES logic)
+    const isTengo = (val) => val === true || val === 'tengo_after_penalty';
+    const isPuede = (val) => val === 'puede';
+    const isNoTengo = (val) => val === false;
     
-    const team1PuedeOrJuegoCount = gameState.teams.team1.players.filter(p => 
-      gameState.juegoDeclarations[p] === true || gameState.juegoDeclarations[p] === 'puede'
-    ).length;
-    const team2PuedeOrJuegoCount = gameState.teams.team2.players.filter(p => 
-      gameState.juegoDeclarations[p] === true || gameState.juegoDeclarations[p] === 'puede'
-    ).length;
+    const team1Players = gameState.teams.team1.players;
+    const team2Players = gameState.teams.team2.players;
     
-    console.log(`JUEGO declarations - Team1 juego: ${team1JuegoCount}, puede/juego: ${team1PuedeOrJuegoCount}`);
-    console.log(`JUEGO declarations - Team2 juego: ${team2JuegoCount}, puede/juego: ${team2PuedeOrJuegoCount}`);
+    // Count each type of declaration per team
+    const team1Tengo = team1Players.filter(p => isTengo(gameState.juegoDeclarations[p])).length;
+    const team1Puede = team1Players.filter(p => isPuede(gameState.juegoDeclarations[p])).length;
+    const team1NoTengo = team1Players.filter(p => isNoTengo(gameState.juegoDeclarations[p])).length;
     
-    // Determine if betting should happen
-    const canBet = (team1JuegoCount > 0 && team2PuedeOrJuegoCount > 0) || 
-                   (team2JuegoCount > 0 && team1PuedeOrJuegoCount > 0);
+    const team2Tengo = team2Players.filter(p => isTengo(gameState.juegoDeclarations[p])).length;
+    const team2Puede = team2Players.filter(p => isPuede(gameState.juegoDeclarations[p])).length;
+    const team2NoTengo = team2Players.filter(p => isNoTengo(gameState.juegoDeclarations[p])).length;
     
-    if (team1JuegoCount === 0 && team2JuegoCount === 0) {
-      // No one has JUEGO - start PUNTO betting
-      console.log('No one has JUEGO (all NO JUEGO or PUEDE) - starting PUNTO betting');
+    console.log(`JUEGO declarations - Team1: ${team1Tengo} tengo, ${team1Puede} puede, ${team1NoTengo} no tengo`);
+    console.log(`JUEGO declarations - Team2: ${team2Tengo} tengo, ${team2Puede} puede, ${team2NoTengo} no tengo`);
+    
+    // Check if everyone said "puede" → start PUNTO betting
+    const everyonePuede = (team1Puede === 2 && team2Puede === 2);
+    if (everyonePuede) {
+      console.log('Everyone said PUEDE - starting PUNTO betting');
       gameState.currentRound = 'PUNTO';
-      // Set guard to prevent premature moveToNextRound calls during PUNTO startup
       try {
         gameState._puntoStartGuard = true;
         setTimeout(() => { gameState._puntoStartGuard = false; }, 1500);
       } catch (e) {}
-      gameState.activePlayerIndex = gameState.manoIndex;
-      gameState.currentBet.bettingTeam = null;
-      
-      // Reset round state for PUNTO
-      resetRoundState();
-      
-      // If mano can't bet, move to next eligible player
-      if (!canPlayerBet(gameState.activePlayerIndex)) {
-        console.log(`Mano (Player ${gameState.manoIndex + 1}) cannot bet in PUNTO, finding next eligible player`);
-        nextPlayerWhoCanBet();
-      }
-      
-      // Update UI to show betting buttons
-      updateScoreboard();
-      updateRoundDisplay();
-      
-      startPlayerTurnTimer(gameState.activePlayerIndex);
-    } else if (!canBet) {
-      // Only one team has JUEGO - follow reference: reveal cards then advance to next round
-      console.log('Only one team has JUEGO - revealing cards, no points awarded');
-      revealAllCards();
-      // After reveal, advance to next round (moveToNextRound will move to CONTEO when appropriate)
-      setTimeout(() => {
-        moveToNextRound();
-      }, 2000);
-    } else {
-      // Start JUEGO betting (only JUEGO and PUEDE players can bet)
+      startPuntoBetting();
+      return;
+    }
+    
+    // Check if no one has JUEGO (all said "no tengo") → start PUNTO betting
+    if (team1Tengo === 0 && team2Tengo === 0 && team1Puede === 0 && team2Puede === 0) {
+      console.log('No one has JUEGO (all NO TENGO) - starting PUNTO betting');
+      gameState.currentRound = 'PUNTO';
+      try {
+        gameState._puntoStartGuard = true;
+        setTimeout(() => { gameState._puntoStartGuard = false; }, 1500);
+      } catch (e) {}
+      startPuntoBetting();
+      return;
+    }
+    
+    // Determine if betting should happen (same logic as PARES)
+    // Betting is ONLY skipped if: 
+    // - 1-2 players from SAME team say "tengo"/"puede" 
+    // - AND both players from OTHER team say "no tengo"
+    const team1HasInterest = (team1Tengo + team1Puede >= 1);
+    const team2HasInterest = (team2Tengo + team2Puede >= 1);
+    const team1AllNoTengo = (team1NoTengo === 2);
+    const team2AllNoTengo = (team2NoTengo === 2);
+    
+    // Betting is skipped only if one team has interest and other team all said no
+    const shouldSkipBetting = (team1HasInterest && team2AllNoTengo) || 
+                              (team2HasInterest && team1AllNoTengo);
+    
+    // Betting happens if we shouldn't skip it
+    const canBet = !shouldSkipBetting;
+    
+    console.log(`JUEGO betting decision: team1HasInterest=${team1HasInterest}, team2HasInterest=${team2HasInterest}, team1AllNoTengo=${team1AllNoTengo}, team2AllNoTengo=${team2AllNoTengo}, shouldSkipBetting=${shouldSkipBetting}, canBet=${canBet}`);
+
+    if (canBet) {
+      // Start JUEGO betting (only TENGO and PUEDE players can bet)
       console.log('Starting JUEGO betting - both teams can compete');
+      
+      // Reset bet state for betting phase
+      gameState.currentBet = {
+        amount: 0,
+        previousAmount: 0,
+        betType: null,
+        teamMakingBet: null,
+        playerMakingBet: null,
+        waitingForResponse: false
+      };
+      
+      // Initialize phase and handlers
+      gameState.juegoPhase = 'betting';
       gameState.activePlayerIndex = gameState.manoIndex;
-      gameState.currentBet.bettingTeam = null;
-      
-      // If mano can't bet, move to next eligible player
-      if (!canPlayerBet(gameState.activePlayerIndex)) {
-        console.log(`Mano (Player ${gameState.manoIndex + 1}) cannot bet in JUEGO, finding next eligible player`);
-        nextPlayerWhoCanBet();
-      }
-      
-      // Update UI to show betting buttons instead of declaration buttons
-      updateScoreboard();
-      
       startPlayerTurnTimer(gameState.activePlayerIndex);
+      updateScoreboard();
+    } else {
+      // Only one team has JUEGO/PUEDE - skip betting, move to PUNTO or conteo
+      console.log('Only one team has interest - skipping JUEGO betting, moving to PUNTO');
+      gameState.currentRound = 'PUNTO';
+      startPuntoBetting();
     }
   }
   
@@ -7724,9 +7763,21 @@ function initGame() {
             gameState.paresDeclarations[playerIndex] = false;
             console.log(`[PARES PENALTY] Player ${playerIndex + 1} declared TENGO but had no PARES; applied penalty and marked as NO TENGO`);
           }
+        } else if (roundName === 'JUEGO' && gameState.juegoDeclarations) {
+          // Same logic for JUEGO
+          const orig = gameState.juegoDeclarations[playerIndex];
+          if ((orig === false) && actuallyHas) {
+            // Mark as post-penalty tengo so eligibility/counting treats them as having juego
+            gameState.juegoDeclarations[playerIndex] = 'tengo_after_penalty';
+            console.log(`[JUEGO PENALTY] Player ${playerIndex + 1} was NO TENGO but had JUEGO; applied penalty and marked as 'tengo_after_penalty'`);
+          } else if ((orig === true) && !actuallyHas) {
+            // Mark as no tengo so they won't participate further
+            gameState.juegoDeclarations[playerIndex] = false;
+            console.log(`[JUEGO PENALTY] Player ${playerIndex + 1} declared TENGO but had no JUEGO; applied penalty and marked as NO TENGO`);
+          }
         }
       } catch (e) {
-        console.warn('[checkPredictionPenalty] failed to adjust pares declaration after penalty', e);
+        console.warn('[checkPredictionPenalty] failed to adjust declaration after penalty', e);
       }
     }
   }
