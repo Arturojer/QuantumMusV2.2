@@ -1028,6 +1028,19 @@ function initGame() {
         console.warn('[hand_started] handler failed', e);
       }
     });
+    
+    socket.on('conteo_results', (data) => {
+      try {
+        console.log('[ONLINE] Received CONTEO results:', data);
+        
+        // Display CONTEO results to the player
+        displayOnlineConteoResults(data);
+        
+      } catch (e) {
+        console.warn('[socket:conteo_results] handler failed', e);
+      }
+    });
+    
     // Server informs all clients when a tunneling moved the mano
     socket.on('tunnel_notification', (tunnel) => {
       try {
