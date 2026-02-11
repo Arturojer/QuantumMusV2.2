@@ -29,14 +29,14 @@ class QuantumDeck:
         11: '1001', 12: '1010'
     }
 
-    def __init__(self, game_mode='4', enable_king_pit_entanglement: bool = True, enable_two_three_entanglement: bool = None):
+    def __init__(self, enable_king_pit_entanglement: bool = True, enable_two_three_entanglement: bool = None, game_mode='4'):
         """
         Initialize QuantumDeck with entanglement options
         
         Args:
-            game_mode: '4' for 4 reyes (only K/Pito entangled), '8' for 8 reyes (K/Pito and 3/2 entangled)
             enable_king_pit_entanglement: Enable Rey-Pito entanglement
             enable_two_three_entanglement: Enable Tres-Dos entanglement (auto-set based on game_mode if None)
+            game_mode: '4' for 4 reyes (only K/Pito entangled), '8' for 8 reyes (K/Pito and 3/2 entangled)
         """
         # Auto-configure entanglement based on game mode if not explicitly set
         if enable_two_three_entanglement is None:
@@ -71,14 +71,28 @@ class QuantumDeck:
         return cards
 
     def shuffle(self, seed: int = None):
-        """Shuffle deck using quantum randomness"""
+        """
+        Shuffle deck using quantum randomness.
+        
+        Args:
+            seed: DEPRECATED - Only for testing/reproducibility. Do not use in production.
+                  Production code should use quantum shuffle (seed=None).
+        
+        Raises:
+            Warning if seed is provided (classical shuffle used for testing only)
+        """
         if seed is not None:
-            # For testing/reproducibility, use classical numpy
-            # Note: This is only for testing - production should use quantum shuffle
+            # For testing/reproducibility only - emit warning
+            import warnings
+            warnings.warn(
+                "Classical shuffle with seed is only for testing. "
+                "Production code should use quantum shuffle (seed=None).",
+                UserWarning
+            )
             np.random.seed(seed)
             np.random.shuffle(self.cards)
         else:
-            # Use quantum shuffle from QuantumRNG
+            # Use quantum shuffle for production
             self.cards = self.qrng.shuffle(self.cards)
         self.deck_index = 0
 

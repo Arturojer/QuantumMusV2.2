@@ -121,7 +121,7 @@ class QuantumMusGame:
         }
         
         # Initialize deck and hands
-        self.deck = QuantumDeck(game_mode)
+        self.deck = QuantumDeck(game_mode=game_mode)
         self.deck.shuffle()
         self.hands = {i: [] for i in range(4)}
         self.discard_pile = []
@@ -143,7 +143,7 @@ class QuantumMusGame:
     def deal_cards(self):
         """Deal 4 cards to each active player using Qiskit-based QuantumDeck"""
         # Always reset deck to 40 cards at the start of a new hand/game
-        self.deck = QuantumDeck(self.game_mode)
+        self.deck = QuantumDeck(game_mode=self.game_mode)
         self.deck.shuffle()
         self.discard_pile = []
         cards_needed = 4 * self.num_players
@@ -412,7 +412,7 @@ class QuantumMusGame:
         self.reset_entanglement_for_new_hand()
         
         # Create new deck and shuffle
-        self.deck = QuantumDeck(self.game_mode)
+        self.deck = QuantumDeck(game_mode=self.game_mode)
         self.deck.shuffle()
         
         # Deal new cards
