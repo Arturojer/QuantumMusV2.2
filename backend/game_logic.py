@@ -955,7 +955,7 @@ class QuantumMusGame:
             if val == 'A':
                 return 1
             if val == '2':
-                return 1
+                return 2 if self.game_mode == '4' else 1
             if val == '3':
                 return 3 if self.game_mode == '4' else 10
             if val in ['J', 'Q', 'K']:
