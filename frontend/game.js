@@ -1186,13 +1186,14 @@ function initGame() {
         console.log(`[ONLINE] Cards collapsed for player ${localIdx + 1} in ${roundName}, penalty:`, penalty);
         
         // Trigger collapse animation for the player who declared (if it's the local player)
-        const showAnimation = localIdx === 0;
+        const isLocalPlayerDeclaration = localIdx === 0;
         
         // Update hands from server
         if (data.updated_hands) {
           Object.keys(data.updated_hands).forEach(serverIdx => {
             const localPlayerIdx = serverToLocal(parseInt(serverIdx));
             const hand = data.updated_hands[serverIdx];
+            const isPlayerWhoDeclared = localPlayerIdx === localIdx;
             
             // Update cards in UI
             const playerZone = document.getElementById(`player${localPlayerIdx + 1}-zone`);
@@ -1210,7 +1211,7 @@ function initGame() {
                   const wasCollapsed = cards[cardIdx].dataset.collapsed === 'true';
                   
                   // If this card was entangled and is now collapsed, add to animation
-                  if (wasEntangled && !wasCollapsed && localPlayerIdx === localIdx) {
+                  if (wasEntangled && !wasCollapsed && isPlayerWhoDeclared) {
                     cardsToCollapse.push({
                       cardElement: cards[cardIdx],
                       finalValue: mappedCard.value,
@@ -1232,14 +1233,14 @@ function initGame() {
               });
               
               // Trigger collapse animation for local player
-              if (showAnimation && cardsToCollapse.length > 0 && localPlayerIdx === localIdx) {
+              if (isLocalPlayerDeclaration && cardsToCollapse.length > 0 && isPlayerWhoDeclared) {
                 console.log(`[ONLINE] Triggering collapse animation for ${cardsToCollapse.length} cards`);
                 window.quantumCollapse.collapseMultipleCards(cardsToCollapse, () => {
                   console.log(`[ONLINE] Collapse animation complete`);
                   // Update partner cards
                   collapsePartnerCards(cardsToCollapse, localPlayerIdx);
                 });
-              } else if (localPlayerIdx === localIdx && cardsToCollapse.length > 0) {
+              } else if (isPlayerWhoDeclared && cardsToCollapse.length > 0) {
                 // No animation but still collapse partners
                 collapsePartnerCards(cardsToCollapse, localPlayerIdx);
               }

@@ -247,7 +247,7 @@ class QuantumCollapseManager:
         Check if hand has pares (pairs)
         Uses game mode to apply value equivalence rules
         """
-        def normalizeValueForPares(val):
+        def normalize_value_for_pares(val):
             """Normalize card values for pair checking in mode 8"""
             if self.game.game_mode == '8':
                 if val == 'A': return '2'  # A and 2 form pairs
@@ -255,7 +255,7 @@ class QuantumCollapseManager:
             return val
         
         # Normalize values according to game mode
-        normalized_values = [normalizeValueForPares(v) for v in card_values]
+        normalized_values = [normalize_value_for_pares(v) for v in card_values]
         
         value_counts = {}
         for value in normalized_values:
@@ -269,13 +269,14 @@ class QuantumCollapseManager:
         Check if hand has juego (31 or more points)
         Uses correct point values based on game mode
         """
-        def get_card_points(val):
+        def get_card_points(val, game_mode):
+            """Calculate points for a card value based on game mode"""
             if val == 'A':
                 return 1
             if val == '2':
-                return 2 if self.game.game_mode == '4' else 1
+                return 2 if game_mode == '4' else 1
             if val == '3':
-                return 3 if self.game.game_mode == '4' else 10
+                return 3 if game_mode == '4' else 10
             if val in ['J', 'Q', 'K']:
                 return 10
             try:
@@ -283,5 +284,5 @@ class QuantumCollapseManager:
             except ValueError:
                 return 0
         
-        points = sum(get_card_points(value) for value in card_values)
+        points = sum(get_card_points(value, self.game.game_mode) for value in card_values)
         return points >= 31
