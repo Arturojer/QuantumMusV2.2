@@ -126,7 +126,30 @@ def _broadcast_action_update(room_id, game, player_index, action, extra_data, re
             'result': result['round_result']
         }, room=room_id)
 
-    if result.get('hand_ended'):
+    if result.get('hand_ended') and result.get('conteo_results'):
+        # Hand ended with CONTEO - broadcast scoring results
+        socketio.emit('conteo_results', {
+            'results': result['conteo_results']['results'],
+            'game_ended': result['conteo_results'].get('game_ended', False),
+            'winner_team': result['conteo_results'].get('winner_team'),
+            'team_scores': {
+                'team1': game.state['teams']['team1']['score'],
+                'team2': game.state['teams']['team2']['score']
+            }
+        }, room=room_id)
+        
+        # If game ended due to score limit, also emit game_ended
+        if result['conteo_results'].get('game_ended'):
+            socketio.emit('game_ended', {
+                'winner': result['conteo_results'].get('winner_team'),
+                'final_scores': {
+                    'team1': game.state['teams']['team1']['score'],
+                    'team2': game.state['teams']['team2']['score']
+                },
+                'reason': 'score_limit'
+            }, room=room_id)
+    elif result.get('hand_ended'):
+        # Legacy path - start new hand immediately (for backward compatibility)
         updated_state = game.get_public_state()
         updated_state['player_hands'] = {
             i: [card.to_dict() for card in game.hands.get(i, [])]
@@ -139,7 +162,8 @@ def _broadcast_action_update(room_id, game, player_index, action, extra_data, re
             'game_mode': game.game_mode
         }, room=room_id)
 
-    if result.get('game_ended'):
+    if result.get('game_ended') and not result.get('conteo_results'):
+        # Game ended due to ordago (not through CONTEO)
         socketio.emit('game_ended', {
             'winner': result.get('winner_team'),
             'final_scores': {
@@ -965,6 +989,40 @@ def handle_trigger_final_collapse(data):
         logger.info(f"Final collapse broadcast in room {room_id}: All remaining cards collapsed")
     else:
         socketio.emit('game_error', {'error': collapse_result.get('error', 'Failed to collapse cards')}, room=room_id)
+
+@socketio.on('acknowledge_conteo')
+def handle_acknowledge_conteo(data):
+    """Handle player acknowledgment of CONTEO results and start new hand"""
+    room_id = data.get('room_id')
+    
+    game = game_manager.get_game(room_id)
+    if not game:
+        emit('game_error', {'error': 'Game not found'})
+        return
+    
+    # Check if game already ended
+    if game.state.get('conteoResults', {}).get('game_ended'):
+        logger.info(f"Game in room {room_id} has ended, not starting new hand")
+        return
+    
+    # Start new hand
+    game.start_new_hand()
+    
+    # Broadcast new hand to all players
+    updated_state = game.get_public_state()
+    updated_state['player_hands'] = {
+        i: [card.to_dict() for card in game.hands.get(i, [])]
+        for i in range(4)
+    }
+    updated_state['manoIndex'] = game.state['manoIndex']
+    updated_state['entanglement'] = game.get_full_entanglement_state()
+    
+    socketio.emit('hand_started', {
+        'game_state': updated_state,
+        'game_mode': game.game_mode
+    }, room=room_id)
+    
+    logger.info(f"New hand started in room {room_id} after CONTEO acknowledgment")
 
 
 # ==================== RUN SERVER ====================
