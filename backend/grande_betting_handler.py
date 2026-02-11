@@ -260,29 +260,33 @@ class GrandeBettingHandler:
     def _resolve_rejection(self, winning_team):
         """
         Both defenders rejected the bet.
-        Attacking/betting team wins 1 point.
+        Attacking/betting team wins the last bet amount (not always 1 point).
         Grande phase ends.
         """
         phase = self.game.state['grandePhase']
         phase['phaseState'] = 'RESOLVED'
+        
+        # Award the last bet amount, not hardcoded 1
+        points_awarded = phase['currentBetAmount']
+        
         phase['result'] = {
             'winner': winning_team,
-            'points': 1,
+            'points': points_awarded,
             'reason': 'rejection',
             'comparison': None
         }
         
-        # Award point immediately
-        self.game.state['teams'][winning_team]['score'] += 1
+        # Award points immediately
+        self.game.state['teams'][winning_team]['score'] += points_awarded
         
-        logger.info(f"{winning_team} wins 1 point (both defenders rejected)")
+        logger.info(f"{winning_team} wins {points_awarded} points (both defenders rejected)")
         
         return {
             'success': True,
             'round_ended': True,
             'grande_ended': True,
             'winner_team': winning_team,
-            'points': 1,
+            'points': points_awarded,
             'reason': 'Both defenders rejected',
             'move_to_next_round': True
         }
@@ -290,54 +294,124 @@ class GrandeBettingHandler:
     def _resolve_acceptance(self):
         """
         A defender accepted the bet.
-        Grande phase ends, but hand comparison is DEFERRED until after all 4 phases.
+        - If ordago (40 points): Game ends immediately, cards collapse, winner determined
+        - If normal bet: Grande phase ends, hand comparison is DEFERRED until after all 4 phases.
         """
-        from card_deck import get_highest_card
+        from card_deck import get_highest_card, compare_cards
         
         phase = self.game.state['grandePhase']
         phase['phaseState'] = 'RESOLVED'
         
-        # Store the bet for later comparison
-        phase['result'] = {
-            'attackingTeam': phase['attackingTeam'],
-            'defendingTeam': phase['defendingTeam'],
-            'betAmount': phase['currentBetAmount'],
-            'betType': phase['betType'],
-            'comparison': 'deferred',
-            'resolved': False
-        }
+        # Check if this is an ordago (all-in bet)
+        is_ordago = phase['betType'] == 'ordago'
         
-        # Get card information for display
-        team1_cards = []
-        team2_cards = []
-        
-        for player_idx, hand in self.game.hands.items():
-            if player_idx in self.game.state['teams']['team1']['players']:
-                team1_cards.extend([card.to_dict() for card in hand])
+        if is_ordago:
+            # ORDAGO: Immediate resolution - game ends now
+            # Get best cards from each team for Grande
+            team1_cards = []
+            team2_cards = []
+            
+            for player_idx, hand in self.game.hands.items():
+                if player_idx in self.game.state['teams']['team1']['players']:
+                    team1_cards.extend([card.to_dict() for card in hand])
+                else:
+                    team2_cards.extend([card.to_dict() for card in hand])
+            
+            team1_best = get_highest_card(team1_cards, self.game.game_mode)
+            team2_best = get_highest_card(team2_cards, self.game.game_mode)
+            
+            result = compare_cards(
+                team1_best['value'] if team1_best else 'A',
+                team2_best['value'] if team2_best else 'A',
+                self.game.game_mode
+            )
+            
+            # Determine winner (ties go to Mano's team)
+            if result > 0:
+                winner_team = 'team1'
+            elif result < 0:
+                winner_team = 'team2'
             else:
-                team2_cards.extend([card.to_dict() for card in hand])
-        
-        team1_best = get_highest_card(team1_cards, self.game.game_mode)
-        team2_best = get_highest_card(team2_cards, self.game.game_mode)
-        
-        logger.info(f"Bet accepted. {phase['currentBetAmount']} points at stake. Comparison deferred.")
-        
-        return {
-            'success': True,
-            'round_ended': True,
-            'grande_ended': True,
-            'bet_accepted': True,
-            'bet_amount': phase['currentBetAmount'],
-            'attacking_team': phase['attackingTeam'],
-            'defending_team': phase['defendingTeam'],
-            'reveal_cards': True,
-            'card_info': {
-                'team1_best': team1_best,
-                'team2_best': team2_best
-            },
-            'comparison_deferred': True,
-            'move_to_next_round': True
-        }
+                # Tie - Mano's team wins
+                mano_team = self.game.get_player_team(self.game.state['manoIndex'])
+                winner_team = mano_team
+                logger.info(f"Grande (ordago) tied. Mano's team ({mano_team}) wins.")
+            
+            # Award 40 points immediately (ordago value)
+            self.game.state['teams'][winner_team]['score'] += 40
+            
+            phase['result'] = {
+                'winner': winner_team,
+                'points': 40,
+                'betType': 'ordago',
+                'comparison': 'immediate',
+                'resolved': True
+            }
+            
+            logger.info(f"ORDAGO accepted! {winner_team} wins 40 points immediately. Game over!")
+            
+            return {
+                'success': True,
+                'round_ended': True,
+                'grande_ended': True,
+                'bet_accepted': True,
+                'bet_amount': 40,
+                'bet_type': 'ordago',
+                'attacking_team': phase['attackingTeam'],
+                'defending_team': phase['defendingTeam'],
+                'reveal_cards': True,
+                'collapse_all_cards': True,
+                'card_info': {
+                    'team1_best': team1_best,
+                    'team2_best': team2_best
+                },
+                'winner_team': winner_team,
+                'points': 40,
+                'game_ended': True,  # Signal that game is over
+                'comparison_immediate': True
+            }
+        else:
+            # Normal bet: Store the bet for later comparison (deferred)
+            phase['result'] = {
+                'attackingTeam': phase['attackingTeam'],
+                'defendingTeam': phase['defendingTeam'],
+                'betAmount': phase['currentBetAmount'],
+                'betType': phase['betType'],
+                'comparison': 'deferred',
+                'resolved': False
+            }
+            
+            # Get card information for display
+            team1_cards = []
+            team2_cards = []
+            
+            for player_idx, hand in self.game.hands.items():
+                if player_idx in self.game.state['teams']['team1']['players']:
+                    team1_cards.extend([card.to_dict() for card in hand])
+                else:
+                    team2_cards.extend([card.to_dict() for card in hand])
+            
+            team1_best = get_highest_card(team1_cards, self.game.game_mode)
+            team2_best = get_highest_card(team2_cards, self.game.game_mode)
+            
+            logger.info(f"Bet accepted. {phase['currentBetAmount']} points at stake. Comparison deferred.")
+            
+            return {
+                'success': True,
+                'round_ended': True,
+                'grande_ended': True,
+                'bet_accepted': True,
+                'bet_amount': phase['currentBetAmount'],
+                'attacking_team': phase['attackingTeam'],
+                'defending_team': phase['defendingTeam'],
+                'reveal_cards': True,
+                'card_info': {
+                    'team1_best': team1_best,
+                    'team2_best': team2_best
+                },
+                'comparison_deferred': True,
+                'move_to_next_round': True
+            }
     
     def _resolve_all_pass(self):
         """

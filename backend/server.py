@@ -116,7 +116,8 @@ def _broadcast_action_update(room_id, game, player_index, action, extra_data, re
             'player_index': player_index,
             'action': action,
             'data': extra_data or {}
-        }
+        },
+        'result': result  # Include the full result in the broadcast
     }, room=room_id)
 
     if result.get('round_ended') and result.get('round_result') is not None:
@@ -139,8 +140,12 @@ def _broadcast_action_update(room_id, game, player_index, action, extra_data, re
 
     if result.get('game_ended'):
         socketio.emit('game_ended', {
-            'winner': result['winner'],
-            'final_scores': result.get('final_scores')
+            'winner': result.get('winner_team'),
+            'final_scores': {
+                'team1': game.state['teams']['team1']['score'],
+                'team2': game.state['teams']['team2']['score']
+            },
+            'reason': 'ordago' if result.get('bet_type') == 'ordago' else 'score_limit'
         }, room=room_id)
 
 

@@ -849,6 +849,37 @@ function initGame() {
         const previousRound = gameState.currentRound;
         gameState.currentRound = st.currentRound || gameState.currentRound;
         
+        // Check if this is an ordago game ending (immediate resolution)
+        if (data.result && data.result.game_ended && data.result.bet_type === 'ordago') {
+          console.log('[ONLINE] ORDAGO accepted - game ending immediately!');
+          
+          // Update scores
+          if (st.teams) {
+            gameState.teams.team1.score = st.teams.team1?.score ?? 0;
+            gameState.teams.team2.score = st.teams.team2?.score ?? 0;
+          }
+          
+          // Freeze game state
+          freezeGameState();
+          
+          // Collapse and reveal all cards
+          collapseAllRemaining().then(() => {
+            revealAllCards(true);
+            
+            // Show game over with ordago winner
+            setTimeout(() => {
+              const winnerTeam = data.result.winner_team === 'team1' ? 1 : 2;
+              showGameOver(winnerTeam, {
+                team1: gameState.teams.team1.score,
+                team2: gameState.teams.team2.score
+              }, { rounds: 0 });
+            }, 2000);
+          });
+          
+          // Don't process further updates - game is over
+          return;
+        }
+        
         // Detect round transitions and reset state accordingly
         if (previousRound !== gameState.currentRound) {
           console.log(`[ONLINE] Round transition: ${previousRound} -> ${gameState.currentRound}`);
