@@ -1062,6 +1062,95 @@ function initGame() {
         window.showGameOver(winnerTeam, { team1: fs.team1 || 0, team2: fs.team2 || 0 }, { rounds: 0 });
       }
     });
+    socket.on('declaration_made', (data) => {
+      try {
+        const localIdx = serverToLocal(data.player_index);
+        const roundName = data.round_name;  // 'PARES' or 'JUEGO'
+        const declaration = data.declaration;
+        
+        console.log(`[ONLINE] Player ${localIdx + 1} declared '${declaration}' in ${roundName}`);
+        
+        // Store declaration locally
+        const key = roundName === 'PARES' ? 'paresDeclarations' : 'juegoDeclarations';
+        if (!gameState[key]) gameState[key] = {};
+        gameState[key][localIdx] = declaration;
+        
+        // Show notification
+        const notificationType = declaration === true ? (roundName === 'PARES' ? 'pares' : 'juego') : 
+                                declaration === false ? (roundName === 'PARES' ? 'no_pares' : 'no_juego') : 
+                                (roundName === 'PARES' ? 'puede_pares' : 'puede_juego');
+        showActionNotification(localIdx, notificationType);
+        
+        // If this was a 'puede' declaration, no collapse happens yet
+        // For 'tengo' or 'no tengo', wait for 'cards_collapsed' event
+      } catch (e) {
+        console.warn('[socket:declaration_made] handler failed', e);
+      }
+    });
+    socket.on('cards_collapsed', (data) => {
+      try {
+        const localIdx = serverToLocal(data.player_index);
+        const roundName = data.round_name;
+        const declaration = data.declaration;
+        const penalty = data.penalty;
+        
+        console.log(`[ONLINE] Cards collapsed for player ${localIdx + 1} in ${roundName}, penalty:`, penalty);
+        
+        // Update hands from server
+        if (data.updated_hands) {
+          Object.keys(data.updated_hands).forEach(serverIdx => {
+            const localPlayerIdx = serverToLocal(parseInt(serverIdx));
+            const hand = data.updated_hands[serverIdx];
+            
+            // Update cards in UI
+            const playerZone = document.getElementById(`player${localPlayerIdx + 1}-zone`);
+            if (playerZone) {
+              const cardsRow = playerZone.querySelector('.cards-row');
+              const cards = cardsRow.querySelectorAll('.quantum-card');
+              
+              hand.forEach((cardData, cardIdx) => {
+                if (cards[cardIdx]) {
+                  // Update card value display
+                  const cardTop = cards[cardIdx].querySelector('.card-top');
+                  const decoration = cards[cardIdx].querySelector('.quantum-decoration');
+                  if (cardTop && decoration) {
+                    const mappedCard = mapBackendCardToFrontend(cardData);
+                    decoration.textContent = mappedCard.value;
+                    // Mark as collapsed
+                    cards[cardIdx].dataset.collapsed = 'true';
+                  }
+                }
+              });
+            }
+          });
+        }
+        
+        // Apply penalty if any
+        if (penalty) {
+          showPenaltyNotification(localIdx, penalty);
+          
+          // Update declaration with penalty marker
+          const key = roundName === 'PARES' ? 'paresDeclarations' : 'juegoDeclarations';
+          if (penalty.penalized) {
+            // Mark as penalized but still eligible for betting
+            if (declaration === 'tengo') {
+              gameState[key][localIdx] = 'tengo_after_penalty';
+            } else {
+              gameState[key][localIdx] = 'no_tengo';
+            }
+          }
+        }
+        
+        // Clear waiting flag and advance to next player
+        if (window._waitingServerDeclaration && window._waitingServerDeclaration.playerIndex === localIdx) {
+          window._waitingServerDeclaration = null;
+          nextPlayer();
+          startPlayerTurnTimer(gameState.activePlayerIndex);
+        }
+      } catch (e) {
+        console.warn('[socket:cards_collapsed] handler failed', e);
+      }
+    });
     socket.on('cards_discarded', (data) => {
       try {
         const localIdx = serverToLocal(data.player_index);
@@ -2937,6 +3026,39 @@ function initGame() {
     return null;
   }
   
+  // Make a declaration in online mode (sends to server)
+  function makeDeclaration(playerIndex, declaration, roundName) {
+    if (!window.onlineMode || !window.QuantumMusSocket || !window.QuantumMusOnlineRoom) {
+      console.warn('[makeDeclaration] Not in online mode, ignoring');
+      return;
+    }
+    
+    const serverIdx = localToServer(playerIndex);
+    console.log(`[makeDeclaration] Player ${playerIndex + 1} (server ${serverIdx}) declaring '${declaration}' in ${roundName}`);
+    
+    // First, send the declaration to store it
+    window.QuantumMusSocket.emit('player_declaration', {
+      room_id: window.QuantumMusOnlineRoom,
+      player_index: serverIdx,
+      declaration: declaration === 'tengo' ? true : declaration === 'no_tengo' ? false : 'puede',
+      round_name: roundName
+    });
+    
+    // If tengo or no_tengo, trigger collapse
+    if (declaration === 'tengo' || declaration === 'no_tengo') {
+      window.QuantumMusSocket.emit('trigger_declaration_collapse', {
+        room_id: window.QuantumMusOnlineRoom,
+        player_index: serverIdx,
+        declaration: declaration,
+        round_name: roundName
+      });
+    } else {
+      // For 'puede', just advance to next player
+      nextPlayer();
+      startPlayerTurnTimer(gameState.activePlayerIndex);
+    }
+  }
+  
   function handleParesDeclaration(playerIndex, declaration, isAutoDeclared = false) {
     // declaration can be: true (tengo), false (no tengo), or 'puede'
     gameState.paresDeclarations[playerIndex] = declaration;
@@ -2946,42 +3068,60 @@ function initGame() {
                             declaration === false ? 'no_pares' : 'puede_pares';
     showActionNotification(playerIndex, notificationType);
     
-    // If this was a manual declaration, stop this player's timer and (if local) pass turn immediately
+    // Check if we're in online mode
+    const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
+    
+    // If this was a manual declaration, stop this player's timer
     if (!isAutoDeclared) {
       if (timerInterval) {
         clearTimeout(timerInterval);
         timerInterval = null;
       }
       hideTimerBar(playerIndex);
-      const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
-      if (isOnlineGame) {
-        // Online: wait for server to perform collapse and broadcast; don't change activePlayerIndex locally
-        try { window._waitingServerDeclaration = { playerIndex, roundName: 'PARES', ts: Date.now() }; } catch (e) {}
+      
+      // For online mode, send declaration to server
+      if (isOnlineGame && typeof makeDeclaration === 'function') {
+        const declStr = declaration === true ? 'tengo' : declaration === false ? 'no_tengo' : 'puede';
+        try { 
+          makeDeclaration(playerIndex, declStr, 'PARES');
+          // For tengo/no_tengo, wait for server collapse response
+          // For puede, makeDeclaration will advance the turn
+          if (declaration !== 'puede') {
+            window._waitingServerDeclaration = { playerIndex, roundName: 'PARES', ts: Date.now() };
+          }
+        } catch (e) { 
+          console.error('[handleParesDeclaration] Error calling makeDeclaration:', e);
+        }
       } else {
-        // Local mode: advance immediately
+        // Local mode: collapse and advance
+        if (declaration === true || declaration === false) {
+          collapseOnDeclaration(playerIndex, 'PARES', declaration);
+        }
         nextPlayer();
         startPlayerTurnTimer(gameState.activePlayerIndex);
       }
-    }
-
-    // Collapse cards if declaration is manual and TENGO or NO TENGO (with animation)
-    if (!isAutoDeclared && (declaration === true || declaration === false)) {
-      console.log(`[PARES DECLARATION] Player ${playerIndex + 1} declared ${declaration ? 'TENGO' : 'NO TENGO'} - collapsing cards`);
-      // If online, ask server to perform collapse so all clients see same result
-      const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
+    } else {
+      // Auto-declared - for online mode, still need to send to server
       if (isOnlineGame && typeof makeDeclaration === 'function') {
-        const declStr = declaration === true ? 'tengo' : 'no_tengo';
-        try { makeDeclaration(playerIndex, declStr, 'PARES'); } catch (e) { /* ignore */ }
+        const declStr = declaration === true ? 'tengo' : declaration === false ? 'no_tengo' : 'puede';
+        try { 
+          makeDeclaration(playerIndex, declStr, 'PARES');
+        } catch (e) { 
+          console.error('[handleParesDeclaration] Error calling makeDeclaration:', e);
+        }
       } else {
-        collapseOnDeclaration(playerIndex, 'PARES', declaration);
+        // Local mode
+        if (declaration === true || declaration === false) {
+          collapseOnDeclaration(playerIndex, 'PARES', declaration);
+        }
       }
     }
     
     // Check if all players declared
     if (Object.keys(gameState.paresDeclarations).length < 4) {
       // Still need more declarations - move to next player
-      if (!isAutoDeclared) {
-        // We already advanced the turn immediately for manual declarations
+      if (!isAutoDeclared && !isOnlineGame) {
+        // Local mode only - online mode handles turn advancement via socket events
         proceedWithParesDeclaration();
       }
       return;

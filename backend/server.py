@@ -786,6 +786,43 @@ def handle_play_card_with_entanglement(data):
     else:
         emit('game_error', {'error': result.get('error', 'Failed to play card')})
 
+@socketio.on('player_declaration')
+def handle_player_declaration(data):
+    """Handle player declaration in PARES/JUEGO rounds (tengo/no tengo/puede)"""
+    room_id = data.get('room_id')
+    player_index = data.get('player_index')
+    declaration = data.get('declaration')  # true (tengo), false (no tengo), or 'puede'
+    round_name = data.get('round_name')  # 'PARES' or 'JUEGO'
+    
+    game = game_manager.get_game(room_id)
+    if not game:
+        emit('game_error', {'error': 'Game not found'})
+        logger.error(f"Game not found for room {room_id} in declaration event")
+        return
+    
+    if player_index != game.state['activePlayerIndex']:
+        emit('game_error', {'error': 'Not your turn'})
+        return
+    
+    # Store declaration in game state
+    key = 'paresDeclarations' if round_name == 'PARES' else 'juegoDeclarations'
+    if key not in game.state:
+        game.state[key] = {}
+    game.state[key][player_index] = declaration
+    
+    logger.info(f"Player {player_index} declared '{declaration}' in {round_name} for room {room_id}")
+    
+    # Broadcast declaration to all players
+    socketio.emit('declaration_made', {
+        'success': True,
+        'player_index': player_index,
+        'declaration': declaration,
+        'round_name': round_name,
+        'declarations': game.state[key],
+        'timestamp': datetime.utcnow().isoformat()
+    }, room=room_id)
+
+
 @socketio.on('trigger_declaration_collapse')
 def handle_trigger_declaration_collapse(data):
     """Handle card collapse when player makes a declaration"""
