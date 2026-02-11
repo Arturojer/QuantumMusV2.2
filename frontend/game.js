@@ -8486,19 +8486,39 @@ function applyEntanglementGlows(playerState) {
   
   console.log('[GLOW] Applying entanglement glows:', glowData);
   
+  // Map backend suit names to frontend colors
+  // Backend: 'Oro', 'Copa', 'Espada', 'Basto'
+  // Colors: Oro(gold), Copa(red), Espada(purple), Basto(teal)
+  const paloToColor = {
+    'Oro': '#f5c518',      // gold
+    'Copa': '#ff6b6b',     // red
+    'Espada': '#a78bfa',   // purple
+    'Basto': '#2ec4b6'     // teal
+  };
+  
   // 1. Apply glow to local player's cards
-  if (glowData.has_entangled_pair && glowData.my_cards && glowData.my_cards.length > 0) {
+  if (glowData.has_entangled_pair && glowData.my_cards && glowData.my_cards.length > 0 && glowData.pairs) {
     const player1Cards = document.querySelectorAll('#player1-zone .quantum-card');
+    
+    // Create a map of card index to palo from pairs data
+    const cardIndexToPalo = {};
+    glowData.pairs.forEach(pair => {
+      if (pair.my_card_index !== undefined && pair.palo) {
+        cardIndexToPalo[pair.my_card_index] = pair.palo;
+      }
+    });
     
     glowData.my_cards.forEach(cardIndex => {
       if (player1Cards[cardIndex]) {
         const card = player1Cards[cardIndex];
         // Add entangled-card class for glow effect
         card.classList.add('entangled-card', 'teammate-entangled');
-        // Set color based on suit
-        const suitColor = card.dataset.suitColor || '#2ec4b6';
+        
+        // Use palo from server data to determine glow color
+        const palo = cardIndexToPalo[cardIndex];
+        const suitColor = palo ? paloToColor[palo] : (card.dataset.suitColor || '#2ec4b6');
         card.style.setProperty('--entangle-color', suitColor);
-        console.log(`[GLOW] ✨ Applied glow to local card ${cardIndex}`);
+        console.log(`[GLOW] ✨ Applied glow to local card ${cardIndex} with palo ${palo} (color: ${suitColor})`);
       }
     });
   }
@@ -8529,9 +8549,12 @@ function applyEntanglementGlows(playerState) {
         if (pair.teammate_card_index !== undefined && teammateCards[pair.teammate_card_index]) {
           const card = teammateCards[pair.teammate_card_index];
           card.classList.add('entangled-card', 'teammate-entangled');
-          const suitColor = card.dataset.suitColor || '#a78bfa'; // Different color for teammate
+          
+          // Use palo from server data to determine glow color
+          const palo = pair.palo;
+          const suitColor = palo ? paloToColor[palo] : (card.dataset.suitColor || '#a78bfa');
           card.style.setProperty('--entangle-color', suitColor);
-          console.log(`[GLOW] ✨ Applied glow to teammate card at index ${pair.teammate_card_index}`);
+          console.log(`[GLOW] ✨ Applied glow to teammate card at index ${pair.teammate_card_index} with palo ${palo} (color: ${suitColor})`);
         }
       });
       
