@@ -55,11 +55,20 @@ class GrandeBettingHandler:
         Returns dict with success, phase updates, and next actions
         """
         
+        # Validate turn
         if player_index != self.game.state['activePlayerIndex']:
-            return {'success': False, 'error': 'Not your turn'}
+            phase = self.game.state.get('grandePhase', {})
+            logger.warning(
+                f"[GRANDE] Player {player_index} tried to act but it's Player {self.game.state['activePlayerIndex']}'s turn. "
+                f"Phase: {phase.get('phaseState')}, AttackingTeam: {phase.get('attackingTeam')}, "
+                f"DefendingTeam: {phase.get('defendingTeam')}, DefendersResponded: {phase.get('defendersResponded', [])}"
+            )
+            return {'success': False, 'error': f"Not your turn (active player: {self.game.state['activePlayerIndex']})"}
         
         phase = self.game.state['grandePhase']
         player_team = self.game.get_player_team(player_index)
+        
+        logger.info(f"[GRANDE] Player {player_index} (Team {player_team}) action: {action} (Phase: {phase['phaseState']})")
         
         # Route to appropriate handler based on phase state
         if phase['phaseState'] == 'NO_BET':
@@ -69,6 +78,7 @@ class GrandeBettingHandler:
             return self._handle_response_to_bet(player_index, player_team, action, extra_data)
         
         else:
+            logger.error(f"[GRANDE] Invalid phase state: {phase['phaseState']}")
             return {'success': False, 'error': 'Invalid phase state'}
     
     def _handle_no_bet_action(self, player_index, player_team, action, extra_data):
@@ -157,30 +167,40 @@ class GrandeBettingHandler:
         
         if action == 'paso':
             # Reject the bet
-            logger.info(f"Player {player_index} rejects the bet")
-            phase['defendersResponded'].append(player_index)
+            logger.info(f"Player {player_index} (Team {player_team}) rejects the bet")
+            
+            # Add to responded list if not already there
+            if player_index not in phase['defendersResponded']:
+                phase['defendersResponded'].append(player_index)
             
             # Check if both defenders have rejected
             if len(phase['defendersResponded']) >= 2:
                 # Both defenders rejected - attacking team wins 1 point
+                logger.info(f"Both defenders rejected. {phase['lastBettingTeam']} wins 1 point.")
                 return self._resolve_rejection(phase['lastBettingTeam'])
             
             # First defender rejected, check partner
             partner_index = self._get_partner(player_index)
+            logger.info(f"First defender (Player {player_index}) rejected. Partner is Player {partner_index}.")
             
             if partner_index not in phase['defendersResponded']:
                 # Partner hasn't responded yet, give them a chance
+                # Keep phase state as WAITING_RESPONSE to indicate we're waiting for partner
+                phase['phaseState'] = 'WAITING_RESPONSE'
                 self.game.state['activePlayerIndex'] = partner_index
-                logger.info(f"First defender rejected. Partner (Player {partner_index}) must respond.")
+                logger.info(f"Setting active player to partner (Player {partner_index}) - they must respond now.")
                 
                 return {
                     'success': True,
                     'first_rejection': True,
                     'next_player': partner_index,
-                    'partner_must_respond': True
+                    'partner_must_respond': True,
+                    'defending_team': defending_team,
+                    'waiting_for_player': partner_index
                 }
             else:
                 # Partner already rejected - both rejected
+                logger.info(f"Partner (Player {partner_index}) already rejected. Both defenders rejected.")
                 return self._resolve_rejection(phase['lastBettingTeam'])
         
         elif action == 'accept':
@@ -216,13 +236,15 @@ class GrandeBettingHandler:
         phase['attackingTeam'] = raising_team
         phase['defendingTeam'] = old_attacking_team
         phase['lastBettingTeam'] = raising_team
-        phase['defendersResponded'] = []
+        phase['defendersResponded'] = []  # Reset defenders list for new bet
+        phase['phaseState'] = 'BET_PLACED'  # New bet placed, waiting for response
         
-        logger.info(f"Player {player_index} raises to {new_bet_amount} ({'ÓRDAGO' if is_ordago else 'ENVIDO'})")
+        logger.info(f"Player {player_index} (Team {raising_team}) raises to {new_bet_amount} ({'ÓRDAGO' if is_ordago else 'ENVIDO'})")
         
-        # Find first defender from new defending team (closest to Mano counterclockwise/right)
-        first_defender = self._get_first_team_member_from_mano(old_attacking_team)
+        # Find first defender from new defending team (closest counterclockwise/right from raiser)
+        first_defender = self._get_next_defender_clockwise(player_index)
         self.game.state['activePlayerIndex'] = first_defender
+        logger.info(f"After raise, first defender is Player {first_defender} (Team {old_attacking_team})")
         
         return {
             'success': True,
@@ -231,7 +253,8 @@ class GrandeBettingHandler:
             'bet_type': 'ordago' if is_ordago else 'envido',
             'attacking_team': raising_team,
             'defending_team': old_attacking_team,
-            'next_player': first_defender
+            'next_player': first_defender,
+            'waiting_for_defense': True
         }
     
     def _resolve_rejection(self, winning_team):
