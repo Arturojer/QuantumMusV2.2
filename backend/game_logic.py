@@ -797,3 +797,222 @@ class QuantumMusGame:
                 for i in range(4)
             }
         }
+    
+    # ============ AUTO-DECLARATION METHODS ============
+    
+    def should_auto_declare(self, player_index, round_name):
+        """
+        Check if a player should auto-declare for PARES or JUEGO
+        Returns True if all cards are collapsed and outcome is certain
+        """
+        hand = self.hands.get(player_index, [])
+        if not hand:
+            return False
+        
+        # Check if all cards are collapsed
+        all_collapsed = all(getattr(card, 'is_collapsed', False) for card in hand)
+        if not all_collapsed:
+            # Has entangled cards - check if outcome is certain
+            return self.get_auto_declaration_value(player_index, round_name) is not None
+        
+        return True
+    
+    def get_auto_declaration_value(self, player_index, round_name):
+        """
+        Get the auto-declaration value for a player
+        Returns True (tengo), False (no tengo), or None (uncertain, needs manual)
+        """
+        hand = self.hands.get(player_index, [])
+        if not hand:
+            return None
+        
+        # Check if all cards are collapsed
+        all_collapsed = all(getattr(card, 'is_collapsed', False) for card in hand)
+        
+        if all_collapsed:
+            # Simple case - all cards collapsed
+            if round_name == 'PARES':
+                return self._has_pares(hand)
+            elif round_name == 'JUEGO':
+                return self._has_juego(hand)
+            return None
+        
+        # Has entangled cards - check all possible combinations
+        if round_name == 'PARES':
+            return self._check_certain_pares_outcome(hand)
+        elif round_name == 'JUEGO':
+            return self._check_certain_juego_outcome(hand)
+        
+        return None
+    
+    def _has_pares(self, hand):
+        """Check if a hand has pares (all cards must be collapsed)"""
+        value_counts = {}
+        for card in hand:
+            value = getattr(card, 'value', None)
+            if value is None:
+                continue
+            value_counts[value] = value_counts.get(value, 0) + 1
+        
+        return any(count >= 2 for count in value_counts.values())
+    
+    def _has_juego(self, hand):
+        """Check if a hand has juego (all cards must be collapsed)"""
+        def get_card_points(val):
+            if val == 'A':
+                return 1
+            if val == '2':
+                return 2 if self.game_mode == '4' else 1
+            if val == '3':
+                return 3 if self.game_mode == '4' else 10
+            if val in ['J', 'Q', 'K']:
+                return 10
+            try:
+                return int(val)
+            except ValueError:
+                return 0
+        
+        sum_points = sum(get_card_points(getattr(card, 'value', '')) for card in hand)
+        return sum_points >= 31
+    
+    def _check_certain_pares_outcome(self, hand):
+        """
+        Check if PARES outcome is certain despite having entangled cards
+        Returns True (always has pares), False (never has pares), or None (uncertain)
+        """
+        # Get entangled cards and their possible values
+        entangled_cards = []
+        collapsed_cards = []
+        
+        for card in hand:
+            if getattr(card, 'is_collapsed', False):
+                collapsed_cards.append(getattr(card, 'value', ''))
+            else:
+                # Entangled card - get both possible values
+                main_value = getattr(card, 'value', '')
+                partner_card_id = getattr(card, 'partner_card_id', None)
+                if partner_card_id and partner_card_id.partner_id:
+                    # Get partner's value
+                    partner_value = self._get_card_value_by_id(partner_card_id.partner_id)
+                    entangled_cards.append([main_value, partner_value])
+                else:
+                    entangled_cards.append([main_value])
+        
+        if not entangled_cards:
+            # Should not happen, but treat as collapsed case
+            return self._has_pares(hand)
+        
+        # Check all possible combinations
+        can_have_pares = False
+        can_not_have_pares = False
+        
+        def check_combination(values):
+            """Check if a combination of values has pares"""
+            all_values = collapsed_cards + values
+            value_counts = {}
+            for v in all_values:
+                value_counts[v] = value_counts.get(v, 0) + 1
+            return any(count >= 2 for count in value_counts.values())
+        
+        def generate_combinations(idx, current):
+            nonlocal can_have_pares, can_not_have_pares
+            if idx == len(entangled_cards):
+                has_pares = check_combination(current)
+                if has_pares:
+                    can_have_pares = True
+                else:
+                    can_not_have_pares = True
+                return
+            
+            for value in entangled_cards[idx]:
+                generate_combinations(idx + 1, current + [value])
+        
+        generate_combinations(0, [])
+        
+        # If outcome is certain across all combinations
+        if can_have_pares and not can_not_have_pares:
+            return True
+        elif not can_have_pares and can_not_have_pares:
+            return False
+        else:
+            return None  # Uncertain
+    
+    def _check_certain_juego_outcome(self, hand):
+        """
+        Check if JUEGO outcome is certain despite having entangled cards
+        Returns True (always has juego), False (never has juego), or None (uncertain)
+        """
+        def get_card_points(val):
+            if val == 'A':
+                return 1
+            if val == '2':
+                return 1
+            if val == '3':
+                return 3 if self.game_mode == '4' else 10
+            if val in ['J', 'Q', 'K']:
+                return 10
+            try:
+                return int(val)
+            except ValueError:
+                return 0
+        
+        # Get entangled cards and their possible values
+        entangled_cards = []
+        collapsed_points = 0
+        
+        for card in hand:
+            if getattr(card, 'is_collapsed', False):
+                collapsed_points += get_card_points(getattr(card, 'value', ''))
+            else:
+                # Entangled card - get both possible values
+                main_value = getattr(card, 'value', '')
+                partner_card_id = getattr(card, 'partner_card_id', None)
+                if partner_card_id and partner_card_id.partner_id:
+                    partner_value = self._get_card_value_by_id(partner_card_id.partner_id)
+                    entangled_cards.append([main_value, partner_value])
+                else:
+                    entangled_cards.append([main_value])
+        
+        if not entangled_cards:
+            # All collapsed
+            return collapsed_points >= 31
+        
+        # Check all possible combinations
+        can_have_juego = False
+        can_not_have_juego = False
+        
+        def check_combination(values):
+            """Check if a combination of values has juego"""
+            total = collapsed_points + sum(get_card_points(v) for v in values)
+            return total >= 31
+        
+        def generate_combinations(idx, current):
+            nonlocal can_have_juego, can_not_have_juego
+            if idx == len(entangled_cards):
+                has_juego = check_combination(current)
+                if has_juego:
+                    can_have_juego = True
+                else:
+                    can_not_have_juego = True
+                return
+            
+            for value in entangled_cards[idx]:
+                generate_combinations(idx + 1, current + [value])
+        
+        generate_combinations(0, [])
+        
+        # If outcome is certain across all combinations
+        if can_have_juego and not can_not_have_juego:
+            return True
+        elif not can_have_juego and can_not_have_juego:
+            return False
+        else:
+            return None  # Uncertain
+    
+    def _get_card_value_by_id(self, card_id):
+        """Get card value by card ID from all hands"""
+        for hand in self.hands.values():
+            for card in hand:
+                if hasattr(card, 'card_id') and card.card_id == card_id:
+                    return getattr(card, 'value', '')
+        return ''

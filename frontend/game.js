@@ -903,6 +903,25 @@ function initGame() {
               console.log('[ONLINE] Bet originated in MUS - preserving classical defender order');
             }
           }
+          
+          // Show declaration banner when entering PARES or JUEGO rounds in online mode
+          if (gameState.currentRound === 'PARES') {
+            console.log('[ONLINE] Entering PARES declaration round');
+            gameState.paresDeclarations = {};
+            // Show banner to all players
+            showDeclarationBanner('PARES', () => {
+              console.log('[ONLINE] PARES declaration banner dismissed, waiting for server auto-declarations');
+              // Server will automatically emit declarations for players that can auto-declare
+            });
+          } else if (gameState.currentRound === 'JUEGO') {
+            console.log('[ONLINE] Entering JUEGO declaration round');
+            gameState.juegoDeclarations = {};
+            // Show banner to all players
+            showDeclarationBanner('JUEGO', () => {
+              console.log('[ONLINE] JUEGO declaration banner dismissed, waiting for server auto-declarations');
+              // Server will automatically emit declarations for players that can auto-declare
+            });
+          }
         }
         
         if (typeof st.manoIndex !== 'undefined') {
@@ -1078,23 +1097,26 @@ function initGame() {
                                 (roundName === 'PARES' ? 'puede_pares' : 'puede_juego');
         showActionNotification(localIdx, notificationType);
         
-        // If server provided next_player (for 'puede' or auto-declarations), update active player
-        if (data.next_player !== null && data.next_player !== undefined) {
+        // Check if all players have declared
+        const allDeclared = Object.keys(gameState[key]).length === 4;
+        
+        if (allDeclared) {
+          // All players declared - transition to betting or next round
+          console.log(`[ONLINE] All players declared in ${roundName}, transitioning to betting/next round`);
+          if (roundName === 'PARES') {
+            handleAllParesDeclarationsDone();
+          } else if (roundName === 'JUEGO') {
+            handleAllJuegoDeclarationsDone();
+          }
+        } else if (data.next_player !== null && data.next_player !== undefined) {
+          // More declarations needed - update active player
           const nextLocalIdx = serverToLocal(data.next_player);
           gameState.activePlayerIndex = nextLocalIdx;
           
-          // Continue with declaration round if not all declared yet
-          // This includes checking for next auto-declarations
-          if (Object.keys(gameState[key]).length < 4) {
-            console.log(`[ONLINE] Continuing PARES declarations, next player: ${nextLocalIdx + 1}`);
-            // Small delay to ensure state is updated before checking auto-declaration
-            setTimeout(() => {
-              proceedWithParesDeclaration();
-            }, 100);
-          } else {
-            // All declared, start timer for next phase
-            startPlayerTurnTimer(nextLocalIdx);
-          }
+          console.log(`[ONLINE] Continuing ${roundName} declarations, next player: ${nextLocalIdx + 1}`);
+          
+          // Start timer for next player (server will auto-declare if possible)
+          startPlayerTurnTimer(nextLocalIdx);
         }
         
         // For manual 'tengo' or 'no tengo', wait for 'cards_collapsed' event
@@ -1229,23 +1251,21 @@ function initGame() {
           gameState.activePlayerIndex = nextLocalIdx;
           console.log(`[ONLINE] Next player after collapse: ${nextLocalIdx + 1}`);
           
-          // Continue with declaration round if in PARES or JUEGO and not all declared yet
-          if (roundName === 'PARES') {
-            const key = 'paresDeclarations';
-            if (Object.keys(gameState[key]).length < 4) {
-              // Call proceedWithParesDeclaration to check for auto-declarations
-              setTimeout(() => {
-                proceedWithParesDeclaration();
-              }, 500);
-            }
-          } else if (roundName === 'JUEGO') {
-            const key = 'juegoDeclarations';
-            if (Object.keys(gameState[key]).length < 4) {
-              // TODO: Add proceedWithJuegoDeclaration if needed
-              startPlayerTurnTimer(gameState.activePlayerIndex);
-            }
+          // Check if more declarations are needed
+          const key = roundName === 'PARES' ? 'paresDeclarations' : 'juegoDeclarations';
+          if (Object.keys(gameState[key]).length < 4) {
+            // More declarations needed - server will auto-declare if possible
+            // Just start the timer for the next player
+            console.log(`[ONLINE] Waiting for next ${roundName} declaration from player ${nextLocalIdx + 1}`);
+            startPlayerTurnTimer(nextLocalIdx);
           } else {
-            startPlayerTurnTimer(gameState.activePlayerIndex);
+            // All declared - transition to betting/next round
+            console.log(`[ONLINE] All players declared in ${roundName}, transitioning to betting/next round`);
+            if (roundName === 'PARES') {
+              handleAllParesDeclarationsDone();
+            } else if (roundName === 'JUEGO') {
+              handleAllJuegoDeclarationsDone();
+            }
           }
         } else {
           // Fallback: advance turn locally
@@ -5406,10 +5426,40 @@ function initGame() {
       // Auto assume mus - don't end the round
       console.log(`[TIMEOUT] Auto-MUS for player ${playerIndex + 1}`);
       handleMusRound(playerIndex, 'mus');
+    } else if (gameState.currentRound === 'PARES' && gameState.paresDeclarations && Object.keys(gameState.paresDeclarations).length < 4) {
+      // In PARES declaration phase - check if can auto-declare, otherwise choose 'puede'
+      console.log(`[TIMEOUT] PARES declaration phase - checking auto-declaration for player ${playerIndex + 1}`);
+      const shouldAuto = shouldAutoDeclarePares(playerIndex);
+      if (shouldAuto) {
+        const autoValue = getAutoParesDeclaration(playerIndex);
+        if (autoValue !== null) {
+          console.log(`[TIMEOUT] Auto-declaring PARES for player ${playerIndex + 1}: ${autoValue}`);
+          handleParesDeclaration(playerIndex, autoValue, true);
+          return;
+        }
+      }
+      // Can't auto-declare, choose 'puede'
+      console.log(`[TIMEOUT] Auto-choosing PARES PUEDE for player ${playerIndex + 1}`);
+      handleParesDeclaration(playerIndex, 'puede', false);
+    } else if (gameState.currentRound === 'JUEGO' && gameState.juegoDeclarations && Object.keys(gameState.juegoDeclarations).length < 4) {
+      // In JUEGO declaration phase - check if can auto-declare, otherwise choose 'puede'
+      console.log(`[TIMEOUT] JUEGO declaration phase - checking auto-declaration for player ${playerIndex + 1}`);
+      const shouldAuto = shouldAutoDeclareJuego(playerIndex);
+      if (shouldAuto) {
+        const autoValue = getAutoJuegoDeclaration(playerIndex);
+        if (autoValue !== null) {
+          console.log(`[TIMEOUT] Auto-declaring JUEGO for player ${playerIndex + 1}: ${autoValue}`);
+          handleJuegoDeclaration(playerIndex, autoValue, true);
+          return;
+        }
+      }
+      // Can't auto-declare, choose 'puede'
+      console.log(`[TIMEOUT] Auto-choosing JUEGO PUEDE for player ${playerIndex + 1}`);
+      handleJuegoDeclaration(playerIndex, 'puede', false);
     } else if (gameState.currentRound === 'GRANDE' || gameState.currentRound === 'CHICA' || 
                gameState.currentRound === 'PARES' || gameState.currentRound === 'JUEGO') {
       // Timeout in betting rounds = PASO
-      console.log(`[TIMEOUT] Auto-PASO for player ${playerIndex + 1} in ${gameState.currentRound} round`);
+      console.log(`[TIMEOUT] Auto-PASO for player ${playerIndex + 1} in ${gameState.currentRound} betting`);
       handleBettingRound(playerIndex, 'paso', 0);
     } else if (gameState.currentRound === 'PUNTO') {
       // Auto paso in PUNTO round
@@ -6728,6 +6778,13 @@ function initGame() {
         buttons[2].style.display = 'inline-flex'; // Show PUEDE button
         acceptButton.style.display = 'none'; // Hide ACCEPT during declaration
         buttons[4].style.display = 'none'; // Hide ÓRDAGO during declaration
+        
+        // Ensure buttons are enabled if it's local player's turn
+        if (gameState.activePlayerIndex === 0) {
+          musButton.disabled = false;
+          buttons[1].disabled = false;
+          buttons[2].disabled = false;
+        }
       } else if (inJuegoDeclaration) {
         // In JUEGO declaration phase - show TENGO, NO TENGO, PUEDE only
         if (button1Label) button1Label.textContent = 'TENGO JUEGO';
@@ -6738,6 +6795,13 @@ function initGame() {
         buttons[2].style.display = 'inline-flex'; // Show PUEDE button
         acceptButton.style.display = 'none'; // Hide ACCEPT during declaration
         buttons[4].style.display = 'none'; // Hide ÓRDAGO during declaration
+        
+        // Ensure buttons are enabled if it's local player's turn
+        if (gameState.activePlayerIndex === 0) {
+          musButton.disabled = false;
+          buttons[1].disabled = false;
+          buttons[2].disabled = false;
+        }
       } else if (hasActiveBet && isOpponentsBet) {
         // There's an active bet from the OPPONENT team - show response buttons only
         if (button3Label) button3Label.textContent = 'NO QUIERO';

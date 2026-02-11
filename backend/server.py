@@ -148,6 +148,94 @@ def _broadcast_action_update(room_id, game, player_index, action, extra_data, re
             },
             'reason': 'ordago' if result.get('bet_type') == 'ordago' else 'score_limit'
         }, room=room_id)
+    
+    # If round changed to PARES or JUEGO, check for auto-declarations
+    current_round = game.state.get('currentRound')
+    if current_round in ['PARES', 'JUEGO']:
+        _check_and_emit_auto_declaration(room_id, game, current_round)
+
+
+def _check_and_emit_auto_declaration(room_id, game, round_name):
+    """
+    Check if current active player can auto-declare and emit declaration if so.
+    Recursively checks until finding a player that needs manual declaration or all are done.
+    Returns True if auto-declaration was emitted, False otherwise.
+    """
+    if not game:
+        return False
+    
+    current_round = game.state.get('currentRound')
+    if current_round not in ['PARES', 'JUEGO']:
+        return False
+    
+    # Only check for declaration if we're in declaration phase (not betting)
+    key = 'paresDeclarations' if current_round == 'PARES' else 'juegoDeclarations'
+    if key not in game.state:
+        game.state[key] = {}
+    
+    declarations = game.state[key]
+    
+    # If all players have declared, we're in betting phase
+    if len(declarations) >= 4:
+        return False
+    
+    # Keep checking players until finding one that needs manual declaration
+    max_checks = 4  # Prevent infinite loops
+    checks = 0
+    auto_declared_count = 0
+    
+    while checks < max_checks and len(declarations) < 4:
+        checks += 1
+        
+        player_index = game.state.get('activePlayerIndex')
+        if player_index is None:
+            break
+        
+        # Check if this player has already declared
+        if player_index in declarations:
+            # This player already declared, move to next
+            game.next_player()
+            continue
+        
+        # Check if player should auto-declare
+        should_auto = game.should_auto_declare(player_index, current_round)
+        if not should_auto:
+            # This player needs manual declaration, stop here
+            break
+        
+        # Get the auto-declaration value
+        auto_value = game.get_auto_declaration_value(player_index, current_round)
+        if auto_value is None:
+            # Uncertain outcome, needs manual declaration
+            break
+        
+        # Store declaration
+        declarations[player_index] = auto_value
+        
+        # Advance turn (auto-declarations don't require collapse)
+        game.next_player()
+        
+        logger.info(f"Auto-declared for player {player_index} in {current_round}: {auto_value}")
+        
+        # Broadcast auto-declaration
+        socketio.emit('declaration_made', {
+            'success': True,
+            'player_index': player_index,
+            'declaration': auto_value,
+            'round_name': current_round,
+            'declarations': dict(declarations),  # Copy to avoid mutation issues
+            'next_player': game.state['activePlayerIndex'],
+            'is_auto_declared': True,
+            'timestamp': datetime.utcnow().isoformat()
+        }, room=room_id)
+        
+        auto_declared_count += 1
+        
+        # Small delay between auto-declarations for visual clarity
+        if len(declarations) < 4:
+            eventlet.sleep(0.5) if eventlet else None
+    
+    return auto_declared_count > 0
 
 
 def _schedule_discard_timeout(room_id):
@@ -864,6 +952,10 @@ def handle_player_declaration(data):
         'is_auto_declared': is_auto_declared,
         'timestamp': datetime.utcnow().isoformat()
     }, room=room_id)
+    
+    # After declaration, check if next player can auto-declare
+    if advance_turn and len(game.state[key]) < 4:
+        _check_and_emit_auto_declaration(room_id, game, round_name)
 
 
 @socketio.on('trigger_declaration_collapse')
@@ -906,6 +998,11 @@ def handle_trigger_declaration_collapse(data):
         }, room=room_id)
         
         logger.info(f"Collapse broadcast in room {room_id}: Player {player_index} made declaration '{declaration}' in {round_name}, next player: {next_player_index}")
+        
+        # Check if next player can auto-declare
+        key = 'paresDeclarations' if round_name == 'PARES' else 'juegoDeclarations'
+        if len(game.state.get(key, {})) < 4:
+            _check_and_emit_auto_declaration(room_id, game, round_name)
     else:
         socketio.emit('game_error', {'error': collapse_result.get('error', 'Failed to collapse cards')}, room=room_id)
 
