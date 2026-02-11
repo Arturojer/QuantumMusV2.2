@@ -1141,28 +1141,34 @@ function initGame() {
         }
         
         // Apply penalty if any
-        if (penalty) {
-          showPenaltyNotification(localIdx, penalty);
+        if (penalty && penalty.penalized) {
+          // Show penalty notification
+          showPenaltyNotification(localIdx, roundName, penalty.points_deducted);
           
           // Show team point award if points were deducted
-          if (penalty.penalized && penalty.points_deducted) {
+          if (penalty.points_deducted) {
             const playerTeam = gameState.teams.team1.players.includes(localIdx) ? 'team1' : 'team2';
             const opponentTeam = playerTeam === 'team1' ? 'team2' : 'team1';
+            
+            // Deduct points from penalized team's score
+            gameState.teams[playerTeam].score -= penalty.points_deducted;
+            
             // Award goes to opponent team
             showTeamPointAward(opponentTeam, penalty.points_deducted, 'penalty');
+            
+            // Update scoreboard
+            updateScoreboard();
           }
           
           // Update declaration with penalty marker
           const key = roundName === 'PARES' ? 'paresDeclarations' : 'juegoDeclarations';
-          if (penalty.penalized) {
-            // Mark as penalized but still eligible for betting
-            // If declared tengo (true) but was wrong, mark as 'tengo_after_penalty'
-            // If declared no tengo (false) but was wrong, mark as 'no_tengo'
-            if (declaration === true || declaration === 'tengo') {
-              gameState[key][localIdx] = 'tengo_after_penalty';
-            } else {
-              gameState[key][localIdx] = 'no_tengo';
-            }
+          // Mark as penalized but still eligible for betting
+          // If declared tengo (true) but was wrong, mark as 'tengo_after_penalty'
+          // If declared no tengo (false) but was wrong, mark as 'no_tengo'
+          if (declaration === true || declaration === 'tengo') {
+            gameState[key][localIdx] = 'tengo_after_penalty';
+          } else {
+            gameState[key][localIdx] = 'no_tengo';
           }
         }
         

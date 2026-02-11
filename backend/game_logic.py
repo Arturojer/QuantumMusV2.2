@@ -727,23 +727,32 @@ class QuantumMusGame:
     
     # ============ COLLAPSE METHODS ============
     
-    def trigger_collapse_on_declaration(self, player_index, declaration, round_name):
+     def trigger_collapse_on_declaration(self, player_index, declaration, round_name):
         """
         Trigger collapse when a player makes a declaration
         Returns collapse event data suitable for Socket.IO broadcast
         """
-        event, penalty = self.collapse_manager.collapse_on_declaration(
+        event, penalty_points = self.collapse_manager.collapse_on_declaration(
             player_index, declaration, round_name
         )
         
         if not event:
             return {'success': False, 'error': 'Failed to collapse cards'}
         
+        # Format penalty for frontend compatibility
+        penalty_info = None
+        if penalty_points != 0:
+            penalty_info = {
+                'penalized': True,
+                'points_deducted': abs(penalty_points),
+                'reason': f"Predicción incorrecta en {round_name}"
+            }
+        
         # Build response with all hand updates for all players
         return {
             'success': True,
             'collapse_event': event.to_dict(),
-            'penalty': penalty,
+            'penalty': penalty_info,
             'player_index': player_index,
             'declaration': declaration,
             'round_name': round_name,
