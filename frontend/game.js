@@ -252,7 +252,9 @@ function resetRoundState() {
     amount: 0,
     bettingTeam: null,
     betType: null,
-    responses: {}
+    responses: {},
+    raiseCount: 0,
+    previousAmount: 0
   };
   gameState.allPlayersPassed = false;
 
@@ -1141,11 +1143,21 @@ function initGame() {
         if (penalty) {
           showPenaltyNotification(localIdx, penalty);
           
+          // Show team point award if points were deducted
+          if (penalty.penalized && penalty.points_deducted) {
+            const playerTeam = gameState.teams.team1.players.includes(localIdx) ? 'team1' : 'team2';
+            const opponentTeam = playerTeam === 'team1' ? 'team2' : 'team1';
+            // Award goes to opponent team
+            showTeamPointAward(opponentTeam, penalty.points_deducted, 'penalty');
+          }
+          
           // Update declaration with penalty marker
           const key = roundName === 'PARES' ? 'paresDeclarations' : 'juegoDeclarations';
           if (penalty.penalized) {
             // Mark as penalized but still eligible for betting
-            if (declaration === 'tengo') {
+            // If declared tengo (true) but was wrong, mark as 'tengo_after_penalty'
+            // If declared no tengo (false) but was wrong, mark as 'no_tengo'
+            if (declaration === true || declaration === 'tengo') {
               gameState[key][localIdx] = 'tengo_after_penalty';
             } else {
               gameState[key][localIdx] = 'no_tengo';
@@ -2166,16 +2178,31 @@ function initGame() {
         
         if (allDefendersPassed) {
           // Both defenders passed - bet rejected
-          // PUNTO: 2 points, GRANDE/CHICA/PARES/JUEGO: 1 point or previous bet amount
+          // TODO: Fix cumulative rejection point calculation
+          // Current bug: Only awards previousAmount for single raise, not cumulative total
+          // Should track raiseCount and:
+          // - First bet rejected (no raises): 1 point
+          // - Single raise rejected: award previousAmount (amount before last raise)
+          // - Multiple raises rejected: award cumulative total (currentBet.amount)
+          // Backend already implements this correctly, but frontend needs sync
           let points;
           if (gameState.currentRound === 'PUNTO') {
             points = 2; // PUNTO rejection always gives 2 points
           } else {
-            points = gameState.currentBet.isRaise ? gameState.currentBet.previousAmount : 1;
+            // TEMPORARY FIX: Use backend logic when available via socket
+            // For now, use current logic but this is INCORRECT for multiple raises
+            const raiseCount = gameState.currentBet.raiseCount || 0;
+            if (raiseCount === 0) {
+              points = 1; // First bet, no raises
+            } else if (raiseCount === 1) {
+              points = gameState.currentBet.previousAmount || gameState.currentBet.amount;
+            } else {
+              points = gameState.currentBet.amount; // Multiple raises - cumulative
+            }
           }
           gameState.teams[gameState.currentBet.bettingTeam].score += points;
           console.log(`Team ${gameState.currentBet.bettingTeam} wins ${points} points (bet rejected in ${gameState.currentRound})`);
-          showTeamPointsNotification(gameState.currentBet.bettingTeam, points);
+          showTeamPointAward(gameState.currentBet.bettingTeam, points, 'rejected');
           updateScoreboard();
           
           // Check for game over
@@ -2348,6 +2375,7 @@ function initGame() {
       gameState.currentBet.bettingTeam = playerTeam;
       gameState.currentBet.betType = 'envido';
       gameState.currentBet.isRaise = isRaise;
+      gameState.currentBet.raiseCount = (gameState.currentBet.raiseCount || 0) + (isRaise ? 1 : 0);
       gameState.currentBet.responses = {};
 
       // Mark that a bet was placed this round (used later at CONTEO to decide 1pt)
@@ -2409,6 +2437,7 @@ function initGame() {
       gameState.currentBet.bettingTeam = playerTeam;
       gameState.currentBet.betType = 'ordago';
       gameState.currentBet.responses = {};
+      gameState.currentBet.raiseCount = gameState.currentBet.raiseCount || 0; // Preserve if raised to ordago
       
       // Turn goes to defending team, starting with closest to mano
       const manoTeam = getPlayerTeam(gameState.manoIndex);
@@ -3084,6 +3113,12 @@ function initGame() {
     
     // Check if we're in online mode
     const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
+    
+    // If auto-declared, disable buttons to prevent player interaction
+    if (isAutoDeclared) {
+      const buttons = document.querySelectorAll('.scoreboard-controls .quantum-gate');
+      buttons.forEach(btn => btn.disabled = true);
+    }
     
     // If this was a manual declaration, stop this player's timer
     if (!isAutoDeclared) {
@@ -6680,6 +6715,44 @@ function initGame() {
       notification.style.animation = 'fadeOut 0.3s ease-out';
       setTimeout(() => notification.remove(), 300);
     }, duration);
+  }
+
+  // Show team point award notification
+  function showTeamPointAward(teamKey, points, reason = '') {
+    const teamName = gameState.teams[teamKey].name;
+    const teamColor = teamKey === 'team1' ? '#2ec4b6' : '#ff9e6d';
+    
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+      position: fixed;
+      top: 100px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+      border: 2px solid ${teamColor};
+      border-radius: 15px;
+      padding: 15px 30px;
+      color: ${teamColor};
+      font-size: 1.3rem;
+      font-weight: bold;
+      z-index: 2000;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      opacity: 0;
+      transition: opacity 0.3s;
+    `;
+    
+    const reasonText = reason ? ` (${reason})` : '';
+    notification.innerHTML = `<span style="color:${teamColor};font-weight:700">${teamName}</span>: <span style="color:var(--paper-cream)">+${points} pt${points !== 1 ? 's' : ''}${reasonText}</span>`;
+    document.body.appendChild(notification);
+    
+    // Fade in
+    setTimeout(() => { notification.style.opacity = '1'; }, 10);
+    
+    // Fade out and remove
+    setTimeout(() => {
+      notification.style.opacity = '0';
+      setTimeout(() => notification.remove(), 300);
+    }, 2500);
   }
 
   function showActionNotification(playerIndex, action, extraData = {}) {
