@@ -240,7 +240,24 @@ def get_card_order(game_mode='4'):
 
 
 def normalize_card_value(value, game_mode='4'):
-    """Normalize card values for comparison"""
+    """Normalize card values for comparison
+    
+    Handles both letter format (J, Q, K) and numeric format (10, 11, 12)
+    from the Logica_cuantica module
+    """
+    # Convert numeric values to letter format
+    if value == 10 or value == '10':
+        value = 'J'
+    elif value == 11 or value == '11':
+        value = 'Q'
+    elif value == 12 or value == '12':
+        value = 'K'
+    elif value == 1 or value == '1':
+        value = 'A'
+    
+    # Convert to string if numeric
+    value = str(value)
+    
     if game_mode == '8':
         # In 8 reyes mode: 3 = K, 2 = A
         if value == '3':
