@@ -1078,20 +1078,26 @@ function initGame() {
                                 (roundName === 'PARES' ? 'puede_pares' : 'puede_juego');
         showActionNotification(localIdx, notificationType);
         
-        // If server provided next_player (for 'puede' declarations), update active player
+        // If server provided next_player (for 'puede' or auto-declarations), update active player
         if (data.next_player !== null && data.next_player !== undefined) {
           const nextLocalIdx = serverToLocal(data.next_player);
           gameState.activePlayerIndex = nextLocalIdx;
-          startPlayerTurnTimer(nextLocalIdx);
           
           // Continue with declaration round if not all declared yet
+          // This includes checking for next auto-declarations
           if (Object.keys(gameState[key]).length < 4) {
-            proceedWithParesDeclaration();
+            console.log(`[ONLINE] Continuing PARES declarations, next player: ${nextLocalIdx + 1}`);
+            // Small delay to ensure state is updated before checking auto-declaration
+            setTimeout(() => {
+              proceedWithParesDeclaration();
+            }, 100);
+          } else {
+            // All declared, start timer for next phase
+            startPlayerTurnTimer(nextLocalIdx);
           }
         }
         
-        // If this was a 'puede' declaration, no collapse happens yet
-        // For 'tengo' or 'no tengo', wait for 'cards_collapsed' event
+        // For manual 'tengo' or 'no tengo', wait for 'cards_collapsed' event
       } catch (e) {
         console.warn('[socket:declaration_made] handler failed', e);
       }
