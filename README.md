@@ -103,4 +103,4 @@ CESGA/
 
 ## Créditos
 
-Proyecto desarrollado en el contexto UCM FISICA / CESGA. Personajes inspirados en figuras de la información e informática cuántica (Preskill, Cirac, Zoller, Deutsch).
+Proyecto desarrollado en el contexto UCM FISICA / CESGA. Personajes inspirados en figuras de la información e informática cuántica (Preskill, Cirac, Zoller, Deutsch, Simmons, Broadbent, Halpern, Hallberg).
