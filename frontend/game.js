@@ -1163,6 +1163,34 @@ function initGame() {
         // Clear waiting flag and advance to next player
         if (window._waitingServerDeclaration && window._waitingServerDeclaration.playerIndex === localIdx) {
           window._waitingServerDeclaration = null;
+        }
+        
+        // Update active player from server if provided
+        if (data.next_player !== null && data.next_player !== undefined) {
+          const nextLocalIdx = serverToLocal(data.next_player);
+          gameState.activePlayerIndex = nextLocalIdx;
+          console.log(`[ONLINE] Next player after collapse: ${nextLocalIdx + 1}`);
+          
+          // Continue with declaration round if in PARES or JUEGO and not all declared yet
+          if (roundName === 'PARES') {
+            const key = 'paresDeclarations';
+            if (Object.keys(gameState[key]).length < 4) {
+              // Call proceedWithParesDeclaration to check for auto-declarations
+              setTimeout(() => {
+                proceedWithParesDeclaration();
+              }, 500);
+            }
+          } else if (roundName === 'JUEGO') {
+            const key = 'juegoDeclarations';
+            if (Object.keys(gameState[key]).length < 4) {
+              // TODO: Add proceedWithJuegoDeclaration if needed
+              startPlayerTurnTimer(gameState.activePlayerIndex);
+            }
+          } else {
+            startPlayerTurnTimer(gameState.activePlayerIndex);
+          }
+        } else {
+          // Fallback: advance turn locally
           nextPlayer();
           startPlayerTurnTimer(gameState.activePlayerIndex);
         }
@@ -3147,6 +3175,26 @@ function initGame() {
         const declStr = declaration === true ? 'tengo' : declaration === false ? 'no_tengo' : 'puede';
         try { 
           makeDeclaration(playerIndex, declStr, 'PARES');
+          
+          // For auto-declarations with tengo/no_tengo, immediately trigger collapse
+          if (declaration !== 'puede') {
+            // Auto-collapse happens immediately for 0%/100% cases
+            console.log(`[AUTO-DECLARATION] Triggering immediate collapse for player ${playerIndex}`);
+            // Small delay to let server process declaration first
+            setTimeout(() => {
+              // Trigger collapse on server
+              const socket = window.QuantumMusSocket;
+              const roomId = window.QuantumMusOnlineRoom;
+              if (socket && roomId) {
+                socket.emit('trigger_declaration_collapse', {
+                  room_id: roomId,
+                  player_index: playerIndex,
+                  declaration: declStr,
+                  round_name: 'PARES'
+                });
+              }
+            }, 100);
+          }
           // Server will handle turn advancement via socket events
         } catch (e) { 
           console.error('[handleParesDeclaration] Error calling makeDeclaration:', e);
@@ -3156,6 +3204,7 @@ function initGame() {
         if (declaration === true || declaration === false) {
           collapseOnDeclaration(playerIndex, 'PARES', declaration);
         }
+        // Note: Turn advancement handled by proceedWithParesDeclaration in local mode
       }
     }
     

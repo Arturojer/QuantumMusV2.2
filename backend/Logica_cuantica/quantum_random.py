@@ -1,38 +1,60 @@
 """
 Quantum Random Number Generator
 Uses Qiskit to generate truly quantum random numbers
+Falls back to classical if quantum fails
 """
 
 from qiskit import QuantumCircuit
 from qiskit_aer import AerSimulator
 import numpy as np
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class QuantumRNG:
-    """Quantum Random Number Generator using Qiskit"""
+    """Quantum Random Number Generator using Qiskit with classical fallback"""
     
     def __init__(self):
         self.simulator = AerSimulator()
+        self.quantum_failures = 0
+        self.max_failures_before_warning = 5
     
     def _generate_quantum_bits(self, num_bits: int) -> list[int]:
-        """Generate random bits using quantum measurement"""
-        qc = QuantumCircuit(num_bits, num_bits)
-        # Apply Hadamard to all qubits to create superposition
-        for i in range(num_bits):
-            qc.h(i)
-        # Measure all qubits
-        qc.measure(range(num_bits), range(num_bits))
-        
-        # Execute circuit
-        job = self.simulator.run(qc, shots=1)
-        result = job.result()
-        counts = result.get_counts()
-        
-        # Get the measurement result (binary string)
-        bitstring = list(counts.keys())[0]
-        # Convert to list of ints (reverse to match qubit order)
-        return [int(b) for b in reversed(bitstring)]
+        """Generate random bits using quantum measurement with classical fallback"""
+        try:
+            qc = QuantumCircuit(num_bits, num_bits)
+            # Apply Hadamard to all qubits to create superposition
+            for i in range(num_bits):
+                qc.h(i)
+            # Measure all qubits
+            qc.measure(range(num_bits), range(num_bits))
+            
+            # Execute circuit
+            job = self.simulator.run(qc, shots=1)
+            result = job.result()
+            counts = result.get_counts()
+            
+            # Get the measurement result (binary string)
+            bitstring = list(counts.keys())[0]
+            # Convert to list of ints (reverse to match qubit order)
+            bits = [int(b) for b in reversed(bitstring)]
+            
+            # Reset failure counter on success
+            if self.quantum_failures > 0:
+                logger.info("Quantum RNG recovered after failures")
+                self.quantum_failures = 0
+            
+            return bits
+        except Exception as e:
+            # Fallback to classical random
+            self.quantum_failures += 1
+            if self.quantum_failures <= self.max_failures_before_warning:
+                logger.warning(f"Quantum RNG failed (attempt {self.quantum_failures}), using classical fallback: {e}")
+            
+            # Use numpy for classical fallback
+            return [int(np.random.randint(0, 2)) for _ in range(num_bits)]
     
     def random_int(self, min_val: int, max_val: int) -> int:
         """

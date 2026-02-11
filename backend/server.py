@@ -884,6 +884,10 @@ def handle_trigger_declaration_collapse(data):
     collapse_result = game.trigger_collapse_on_declaration(player_index, declaration, round_name)
     
     if collapse_result['success']:
+        # Advance turn after successful collapse
+        game.next_player()
+        next_player_index = game.state['activePlayerIndex']
+        
         # Broadcast collapse event to ALL players in the room
         socketio.emit('cards_collapsed', {
             'success': True,
@@ -893,24 +897,11 @@ def handle_trigger_declaration_collapse(data):
             'declaration': declaration,
             'round_name': round_name,
             'updated_hands': collapse_result['updated_hands'],
+            'next_player': next_player_index,
             'timestamp': datetime.utcnow().isoformat()
         }, room=room_id)
         
-        logger.info(f"Collapse broadcast in room {room_id}: Player {player_index} made declaration '{declaration}' in {round_name}")
-    
-    if collapse_result['success']:
-        # Broadcast collapse event to ALL players
-        socketio.emit('cards_collapsed', {
-            'success': True,
-            'collapse_event': collapse_result['collapse_event'],
-            'player_index': player_index,
-            'round_name': round_name,
-            'collapse_reason': 'bet_acceptance',
-            'updated_hands': collapse_result['updated_hands'],
-            'timestamp': datetime.utcnow().isoformat()
-        }, room=room_id)
-        
-        logger.info(f"Collapse broadcast in room {room_id}: Player {player_index} accepted bet in {round_name}")
+        logger.info(f"Collapse broadcast in room {room_id}: Player {player_index} made declaration '{declaration}' in {round_name}, next player: {next_player_index}")
     else:
         socketio.emit('game_error', {'error': collapse_result.get('error', 'Failed to collapse cards')}, room=room_id)
 
