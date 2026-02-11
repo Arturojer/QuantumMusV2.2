@@ -243,30 +243,46 @@ class QuantumCollapseManager:
         return False
     
     def _has_pares(self, card_values):
-        """Check if hand has pares (pairs)"""
+        """
+        Check if hand has pares (pairs)
+        Uses game mode to apply value equivalence rules
+        """
+        def normalize_value_for_pares(val):
+            """Normalize card values for pair checking in mode 8"""
+            if self.game.game_mode == '8':
+                if val == 'A': return '2'  # A and 2 form pairs
+                if val == '3': return 'K'  # 3 and K form pairs
+            return val
+        
+        # Normalize values according to game mode
+        normalized_values = [normalize_value_for_pares(v) for v in card_values]
+        
         value_counts = {}
-        for value in card_values:
+        for value in normalized_values:
             value_counts[value] = value_counts.get(value, 0) + 1
         
         # Pares = at least one pair
         return any(count >= 2 for count in value_counts.values())
     
     def _has_juego(self, card_values):
-        """Check if hand has juego (31 or more points)"""
-        points = 0
-        for value in card_values:
-            if value == 'K':
-                points += 10
-            elif value == 'Q':
-                points += 10
-            elif value == 'J':
-                points += 10
-            elif value in ['A', '2', '3']:
-                points += 1
-            else:
-                try:
-                    points += int(value)
-                except:
-                    points += 0
+        """
+        Check if hand has juego (31 or more points)
+        Uses correct point values based on game mode
+        """
+        def get_card_points(val, game_mode):
+            """Calculate points for a card value based on game mode"""
+            if val == 'A':
+                return 1
+            if val == '2':
+                return 2 if game_mode == '4' else 1
+            if val == '3':
+                return 3 if game_mode == '4' else 10
+            if val in ['J', 'Q', 'K']:
+                return 10
+            try:
+                return int(val)
+            except ValueError:
+                return 0
         
+        points = sum(get_card_points(value, self.game.game_mode) for value in card_values)
         return points >= 31

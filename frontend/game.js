@@ -1181,14 +1181,19 @@ function initGame() {
         const roundName = data.round_name;
         const declaration = data.declaration;
         const penalty = data.penalty;
+        const collapseEvent = data.collapse_event;
         
         console.log(`[ONLINE] Cards collapsed for player ${localIdx + 1} in ${roundName}, penalty:`, penalty);
+        
+        // Trigger collapse animation for the player who declared (if it's the local player)
+        const isLocalPlayerDeclaration = localIdx === 0;
         
         // Update hands from server
         if (data.updated_hands) {
           Object.keys(data.updated_hands).forEach(serverIdx => {
             const localPlayerIdx = serverToLocal(parseInt(serverIdx));
             const hand = data.updated_hands[serverIdx];
+            const isPlayerWhoDeclared = localPlayerIdx === localIdx;
             
             // Update cards in UI
             const playerZone = document.getElementById(`player${localPlayerIdx + 1}-zone`);
@@ -1196,19 +1201,49 @@ function initGame() {
               const cardsRow = playerZone.querySelector('.cards-row');
               const cards = cardsRow.querySelectorAll('.quantum-card');
               
+              // Collect cards to collapse with animation
+              const cardsToCollapse = [];
+              
               hand.forEach((cardData, cardIdx) => {
                 if (cards[cardIdx]) {
+                  const mappedCard = mapBackendCardToFrontend(cardData);
+                  const wasEntangled = cards[cardIdx].dataset.entangled === 'true';
+                  const wasCollapsed = cards[cardIdx].dataset.collapsed === 'true';
+                  
+                  // If this card was entangled and is now collapsed, add to animation
+                  if (wasEntangled && !wasCollapsed && isPlayerWhoDeclared) {
+                    cardsToCollapse.push({
+                      cardElement: cards[cardIdx],
+                      finalValue: mappedCard.value,
+                      cardIndex: cardIdx
+                    });
+                  }
+                  
                   // Update card value display
                   const cardTop = cards[cardIdx].querySelector('.card-top');
                   const decoration = cards[cardIdx].querySelector('.quantum-decoration');
                   if (cardTop && decoration) {
-                    const mappedCard = mapBackendCardToFrontend(cardData);
                     decoration.textContent = mappedCard.value;
                     // Mark as collapsed
                     cards[cardIdx].dataset.collapsed = 'true';
+                    cards[cardIdx].dataset.value = mappedCard.value;
+                    cards[cardIdx].dataset.entangled = 'false';
                   }
                 }
               });
+              
+              // Trigger collapse animation for local player
+              if (isLocalPlayerDeclaration && cardsToCollapse.length > 0 && isPlayerWhoDeclared) {
+                console.log(`[ONLINE] Triggering collapse animation for ${cardsToCollapse.length} cards`);
+                window.quantumCollapse.collapseMultipleCards(cardsToCollapse, () => {
+                  console.log(`[ONLINE] Collapse animation complete`);
+                  // Update partner cards
+                  collapsePartnerCards(cardsToCollapse, localPlayerIdx);
+                });
+              } else if (isPlayerWhoDeclared && cardsToCollapse.length > 0) {
+                // No animation but still collapse partners
+                collapsePartnerCards(cardsToCollapse, localPlayerIdx);
+              }
             }
           });
         }
@@ -8451,19 +8486,39 @@ function applyEntanglementGlows(playerState) {
   
   console.log('[GLOW] Applying entanglement glows:', glowData);
   
+  // Map backend suit names to frontend colors
+  // Backend: 'Oro', 'Copa', 'Espada', 'Basto'
+  // Colors: Oro(gold), Copa(red), Espada(purple), Basto(teal)
+  const paloToColor = {
+    'Oro': '#f5c518',      // gold
+    'Copa': '#ff6b6b',     // red
+    'Espada': '#a78bfa',   // purple
+    'Basto': '#2ec4b6'     // teal
+  };
+  
   // 1. Apply glow to local player's cards
-  if (glowData.has_entangled_pair && glowData.my_cards && glowData.my_cards.length > 0) {
+  if (glowData.has_entangled_pair && glowData.my_cards && glowData.my_cards.length > 0 && glowData.pairs) {
     const player1Cards = document.querySelectorAll('#player1-zone .quantum-card');
+    
+    // Create a map of card index to palo from pairs data
+    const cardIndexToPalo = {};
+    glowData.pairs.forEach(pair => {
+      if (pair.my_card_index !== undefined && pair.palo) {
+        cardIndexToPalo[pair.my_card_index] = pair.palo;
+      }
+    });
     
     glowData.my_cards.forEach(cardIndex => {
       if (player1Cards[cardIndex]) {
         const card = player1Cards[cardIndex];
         // Add entangled-card class for glow effect
         card.classList.add('entangled-card', 'teammate-entangled');
-        // Set color based on suit
-        const suitColor = card.dataset.suitColor || '#2ec4b6';
+        
+        // Use palo from server data to determine glow color
+        const palo = cardIndexToPalo[cardIndex];
+        const suitColor = palo ? paloToColor[palo] : (card.dataset.suitColor || '#2ec4b6');
         card.style.setProperty('--entangle-color', suitColor);
-        console.log(`[GLOW] ✨ Applied glow to local card ${cardIndex}`);
+        console.log(`[GLOW] ✨ Applied glow to local card ${cardIndex} with palo ${palo} (color: ${suitColor})`);
       }
     });
   }
@@ -8488,15 +8543,18 @@ function applyEntanglementGlows(playerState) {
     if (teammateZone) {
       const teammateCards = teammateZone.querySelectorAll('.quantum-card');
       
-      // For each pair, mark a card in teammate's hand
-      // Since we don't know which specific card, we mark based on position
-      glowData.pairs.forEach((pair, pairIdx) => {
-        // Mark the first N cards where N is number of pairs
-        if (teammateCards[pairIdx]) {
-          const card = teammateCards[pairIdx];
+      // For each pair, mark the specific card in teammate's hand
+      glowData.pairs.forEach((pair) => {
+        // Use the specific teammate_card_index from backend
+        if (pair.teammate_card_index !== undefined && teammateCards[pair.teammate_card_index]) {
+          const card = teammateCards[pair.teammate_card_index];
           card.classList.add('entangled-card', 'teammate-entangled');
-          const suitColor = card.dataset.suitColor || '#a78bfa'; // Different color for teammate
+          
+          // Use palo from server data to determine glow color
+          const palo = pair.palo;
+          const suitColor = palo ? paloToColor[palo] : (card.dataset.suitColor || '#a78bfa');
           card.style.setProperty('--entangle-color', suitColor);
+          console.log(`[GLOW] ✨ Applied glow to teammate card at index ${pair.teammate_card_index} with palo ${palo} (color: ${suitColor})`);
         }
       });
       

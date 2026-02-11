@@ -385,13 +385,15 @@ class QuantumMusGame:
             
             # Buscar si el compañero tiene la carta pareja
             teammate_has = False
-            for tm_card in teammate_hand:
+            teammate_card_index = None
+            for tm_idx, tm_card in enumerate(teammate_hand):
                 tm_palo = getattr(tm_card, 'palo', None) or tm_card.get('palo')
                 tm_valor = getattr(tm_card, 'valor', None) or tm_card.get('valor')
                 
                 # Verificar si es la pareja (mismo palo, valor complementario)
                 if tm_palo == my_palo and tm_valor == partner_valor:
                     teammate_has = True
+                    teammate_card_index = tm_idx
                     break
             
             if teammate_has:
@@ -400,6 +402,7 @@ class QuantumMusGame:
                     'my_card_index': my_idx,
                     'my_card': my_card.to_dict() if hasattr(my_card, 'to_dict') else my_card,
                     'teammate_index': teammate_index,
+                    'teammate_card_index': teammate_card_index,
                     'teammate_has_partner': True,
                     'palo': my_palo,
                     'my_valor': my_valor,
@@ -433,6 +436,17 @@ class QuantumMusGame:
         """Move to next player (counterclockwise/right in seating order)."""
         self.state['activePlayerIndex'] = self.get_next_player_index()
         return self.state['activePlayerIndex']
+    
+    def set_phase(self, phase):
+        """Set the current phase of the game"""
+        self.state['currentPhase'] = phase
+        logger.info(f"Game {self.room_id} phase set to: {phase}")
+    
+    def complete_declaration_phase(self):
+        """Mark declaration phase as complete and reset active player to mano"""
+        self.state['declarationComplete'] = True
+        self.state['activePlayerIndex'] = self.state['manoIndex']
+        logger.info(f"Declaration phase complete for game {self.room_id}, active player reset to mano {self.state['manoIndex']}")
     
     def reset_round_state(self):
         """Reset round-specific state"""
