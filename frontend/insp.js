@@ -152,6 +152,32 @@ function initGame() {
     startPlayerTurnTimer(gameState.activePlayerIndex);
   }, 3000);
 
+  // ================= NOTIFICATION STACK =================
+function getNotificationContainer() {
+  let container = document.getElementById('notification-stack');
+
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'notification-stack';
+    container.style.cssText = `
+      position: fixed;
+      top: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      z-index: 9999;
+      pointer-events: none;
+    `;
+    document.body.appendChild(container);
+  }
+
+  return container;
+}
+
+
   // ===================== BACKGROUND DECORATIONS =====================
 
   function addQuantumGateDecorations() {
@@ -606,24 +632,13 @@ function initGame() {
     } else if (action === 'ordago') {
       console.log(`Player ${playerIndex + 1} declares ORDAGO!`);
       
-      // Check if this is a raise (ordago as counter to existing bet) or first bet
-      const isRaise = gameState.currentBet.bettingTeam && gameState.currentBet.bettingTeam !== playerTeam;
-      const previousAmount = isRaise ? gameState.currentBet.amount : 0;
-      
-      if (isRaise) {
-        console.log(`[ORDAGO] Counter-raise from bet of ${previousAmount} - previousAmount will be awarded if rejected`);
-      } else {
-        console.log(`[ORDAGO] First bet - 1 point will be awarded if rejected`);
-      }
-      
-      gameState.currentBet.previousAmount = previousAmount; // Save for rejection calculation
       gameState.currentBet.amount = 40;
       gameState.currentBet.bettingTeam = playerTeam;
       gameState.currentBet.betType = 'ordago';
       gameState.currentBet.responses = {};
-      gameState.currentBet.isRaise = isRaise; // Track if this is a counter-raise
       
       const manoTeam = getPlayerTeam(gameState.manoIndex);
+      const isRaise = gameState.currentBet.bettingTeam && gameState.currentBet.bettingTeam !== playerTeam;
       
       let nextOpponent;
       if (manoTeam === opponentTeam) {
@@ -2848,16 +2863,22 @@ function initGame() {
     // Determine if card is entangled
     let isEntangled = false;
     
-    // A and K are ALWAYS entangled with each other (A↔K) in both 4 and 8 reyes
-    // 2 and 3 are entangled with each other (2↔3) ONLY in 8 reyes mode
-    // J and Q are NEVER entangled
+    // Entanglement follows the equivalence rules:
+    // Normal mode (4 reyes): A entangled with K
+    // 8 reyes mode: A entangled with 2, K entangled with 3
     const is8Reyes = gameMode === '8';
-    if (value === 'A' || value === 'K') {
-      isEntangled = true;
-    } else if (is8Reyes && (value === '2' || value === '3')) {
-      isEntangled = true;
+    
+    if (is8Reyes) {
+      // In 8 reyes: A↔2 and K↔3
+      if (value === 'A' || value === '2' || value === 'K' || value === '3') {
+        isEntangled = true;
+      }
+    } else {
+      // In normal mode: A↔K
+      if (value === 'A' || value === 'K') {
+        isEntangled = true;
+      }
     }
-    // Superposition disabled - all other cards (including J, Q) are regular
     
     const cardValues = ['A', '2', '3', '4', '5', '6', '7', 'J', 'Q', 'K'];
     let entangledPartner = '';
@@ -2865,13 +2886,16 @@ function initGame() {
     let coefficientB = 0;
     
     if (isEntangled) {
+      // A and K are always entangled with each other
       if (value === 'A') {
         entangledPartner = 'K';
       } else if (value === 'K') {
         entangledPartner = 'A';
-      } else if (value === '2') {
+      }
+      // In 8 reyes mode: 2 and 3 are also entangled
+      else if (is8Reyes && value === '2') {
         entangledPartner = '3';
-      } else if (value === '3') {
+      } else if (is8Reyes && value === '3') {
         entangledPartner = '2';
       }
       
@@ -3577,10 +3601,6 @@ function initGame() {
     
     const notification = document.createElement('div');
     notification.style.cssText = `
-      position: fixed;
-      top: 80px;
-      left: 50%;
-      transform: translateX(-50%);
       background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
       border: 2px solid ${color};
       border-radius: 15px;
@@ -3595,7 +3615,8 @@ function initGame() {
     `;
     
     notification.textContent = `${teamName}: +${points} ${points === 1 ? 'punto' : 'puntos'}`;
-    document.body.appendChild(notification);
+    getNotificationContainer().appendChild(notification);
+
     
     // Fade in
     setTimeout(() => {
@@ -3633,10 +3654,6 @@ function initGame() {
     
     const notification = document.createElement('div');
     notification.style.cssText = `
-      position: fixed;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
       background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
       border: 2px solid #2ec4b6;
       border-radius: 15px;
@@ -3651,7 +3668,7 @@ function initGame() {
     `;
     
     notification.textContent = `${playerName}: ${actionTexts[action] || action.toUpperCase()}`;
-    document.body.appendChild(notification);
+    getNotificationContainer().appendChild(notification);
     
     // Fade in
     setTimeout(() => {
