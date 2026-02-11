@@ -890,7 +890,18 @@ class QuantumMusGame:
         Returns True (always has pares), False (never has pares), or None (uncertain)
         
         Entanglement: K↔A and 2↔3 (mode 8) can swap values within same suit
+        
+        Value equivalence for PARES in mode 8:
+        - A and 2 are equivalent (form pairs together)
+        - 3 and K are equivalent (form pairs together)
         """
+        def normalizeValueForPares(val):
+            """Normalize card values for pair checking in mode 8"""
+            if self.game_mode == '8':
+                if val == 'A': return '2'  # A and 2 form pairs
+                if val == '3': return 'K'  # 3 and K form pairs
+            return val
+        
         # Get entangled cards and their possible values
         entangled_cards = []
         collapsed_cards = []
@@ -920,18 +931,24 @@ class QuantumMusGame:
                     return None
         
         if not entangled_cards:
-            # All cards collapsed, check directly
-            return self._has_pares(hand)
+            # All cards collapsed, check directly with normalization
+            normalized_values = [normalizeValueForPares(v) for v in collapsed_cards]
+            value_counts = {}
+            for v in normalized_values:
+                value_counts[v] = value_counts.get(v, 0) + 1
+            return any(count >= 2 for count in value_counts.values())
         
         # Check all possible combinations
         can_have_pares = False
         can_not_have_pares = False
         
         def check_combination(values):
-            """Check if a combination of values has pares"""
+            """Check if a combination of values has pares (with normalization)"""
             all_values = collapsed_cards + values
+            # Normalize values for mode 8
+            normalized_values = [normalizeValueForPares(v) for v in all_values]
             value_counts = {}
-            for v in all_values:
+            for v in normalized_values:
                 value_counts[v] = value_counts.get(v, 0) + 1
             return any(count >= 2 for count in value_counts.values())
         
