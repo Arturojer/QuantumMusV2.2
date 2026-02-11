@@ -97,8 +97,10 @@ class QuantumMusGame:
         # Game state
         self.state = {
             'currentRound': 'MUS',
+            'currentPhase': 'DEALING',  # DEALING -> DECLARATION -> VALIDATION -> BETTING -> RESOLUTION
             'manoIndex': 0,
             'activePlayerIndex': 0,
+            'declarationComplete': False,  # Flag to track when declaration phase is done
             'teams': teams,
             'currentBet': {
                 'amount': 0,

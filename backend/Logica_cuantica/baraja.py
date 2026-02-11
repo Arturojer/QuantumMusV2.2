@@ -79,12 +79,15 @@ class QuantumDeck:
         """
         Crear estados de Bell auténticos para pares entrelazados.
         
-        En modo '4': Solo Reyes (K) están entrelazados
-        En modo '8': Reyes (K), Treses (3), y Doses (2) están entrelazados
+        ENTRELAZAMIENTO CORRECTO:
+        - Rey (12) ↔ As (1) del MISMO palo
+        - Dos (2) ↔ Tres (3) del MISMO palo (solo en modo 8)
         
-        Entrelazamiento por equipos:
-        - Equipo 1: Oro ↔ Copa
-        - Equipo 2: Espada ↔ Basto
+        Cada palo tiene su propio par entrelazado:
+        - Oro: Rey↔As
+        - Copa: Rey↔As
+        - Espada: Rey↔As
+        - Basto: Rey↔As
         """
         # Mapear cartas por (palo, valor) para fácil acceso
         card_map = {}
@@ -92,24 +95,23 @@ class QuantumDeck:
             key = (card.palo, card.valor)
             card_map[key] = card
         
-        # Función auxiliar para entrelazar un par
-        def entangle_pair(valor: int, palo1: str, palo2: str):
-            card1 = card_map.get((palo1, valor))
-            card2 = card_map.get((palo2, valor))
+        # Función auxiliar para entrelazar un par del mismo palo
+        def entangle_same_suit_pair(palo: str, valor1: int, valor2: int):
+            """Entrelaza dos valores diferentes del mismo palo"""
+            card1 = card_map.get((palo, valor1))
+            card2 = card_map.get((palo, valor2))
             if card1 and card2:
                 card1.create_bell_pair(card2)
         
-        # Reyes (12) - Siempre entrelazados en ambos modos
+        # Rey (12) ↔ As (1) - Siempre entrelazados en todos los palos
         if self.enable_king_pit_entanglement:
-            entangle_pair(12, 'Oro', 'Copa')      # Equipo 1
-            entangle_pair(12, 'Espada', 'Basto')  # Equipo 2
+            for palo in self.PALOS:
+                entangle_same_suit_pair(palo, 12, 1)  # Rey ↔ As (Pito)
         
-        # Treses (3) y Doses (2) - Solo en modo 8
+        # Dos (2) ↔ Tres (3) - Solo en modo 8, en todos los palos
         if self.enable_two_three_entanglement and self.game_mode == '8':
-            entangle_pair(3, 'Oro', 'Copa')       # Equipo 1
-            entangle_pair(3, 'Espada', 'Basto')   # Equipo 2
-            entangle_pair(2, 'Oro', 'Copa')       # Equipo 1
-            entangle_pair(2, 'Espada', 'Basto')   # Equipo 2
+            for palo in self.PALOS:
+                entangle_same_suit_pair(palo, 2, 3)  # Dos ↔ Tres
 
     def shuffle(self, seed: int = None):
         """
