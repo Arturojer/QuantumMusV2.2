@@ -812,6 +812,12 @@ def handle_player_declaration(data):
     
     logger.info(f"Player {player_index} declared '{declaration}' in {round_name} for room {room_id}")
     
+    # For 'puede' declarations or auto-declarations, advance to next player
+    # (tengo/no tengo will wait for collapse event to advance)
+    advance_turn = (declaration == 'puede')
+    if advance_turn:
+        game.next_player()
+    
     # Broadcast declaration to all players
     socketio.emit('declaration_made', {
         'success': True,
@@ -819,6 +825,7 @@ def handle_player_declaration(data):
         'declaration': declaration,
         'round_name': round_name,
         'declarations': game.state[key],
+        'next_player': game.state['activePlayerIndex'] if advance_turn else None,
         'timestamp': datetime.utcnow().isoformat()
     }, room=room_id)
 

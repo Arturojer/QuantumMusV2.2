@@ -1081,6 +1081,18 @@ function initGame() {
                                 (roundName === 'PARES' ? 'puede_pares' : 'puede_juego');
         showActionNotification(localIdx, notificationType);
         
+        // If server provided next_player (for 'puede' declarations), update active player
+        if (data.next_player !== null && data.next_player !== undefined) {
+          const nextLocalIdx = serverToLocal(data.next_player);
+          gameState.activePlayerIndex = nextLocalIdx;
+          startPlayerTurnTimer(nextLocalIdx);
+          
+          // Continue with declaration round if not all declared yet
+          if (Object.keys(gameState[key]).length < 4) {
+            proceedWithParesDeclaration();
+          }
+        }
+        
         // If this was a 'puede' declaration, no collapse happens yet
         // For 'tengo' or 'no tengo', wait for 'cards_collapsed' event
       } catch (e) {
@@ -2898,10 +2910,15 @@ function initGame() {
       if (canAutoDeclarePares) {
         // Will auto-declare after a 2s delay to match declaration pacing
         const autoResult = getAutoParesDeclaration(gameState.activePlayerIndex);
+        const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
         setTimeout(() => {
           handleParesDeclaration(gameState.activePlayerIndex, autoResult, true);
-          nextPlayer();
-          proceedWithParesDeclaration();
+          // For local mode, advance turn here
+          // For online mode, let server handle turn advancement
+          if (!isOnlineGame) {
+            nextPlayer();
+            proceedWithParesDeclaration();
+          }
         }, 2000);
       } else {
         // Player needs to manually declare
@@ -3082,11 +3099,8 @@ function initGame() {
         try { 
           makeDeclaration(playerIndex, declStr, 'PARES');
           // For tengo/no_tengo, wait for server collapse response before advancing
-          // For puede, advance immediately after sending declaration
-          if (declaration === 'puede') {
-            nextPlayer();
-            startPlayerTurnTimer(gameState.activePlayerIndex);
-          } else {
+          // For puede, server will send next_player in declaration_made event
+          if (declaration !== 'puede') {
             window._waitingServerDeclaration = { playerIndex, roundName: 'PARES', ts: Date.now() };
           }
         } catch (e) { 
@@ -3106,11 +3120,7 @@ function initGame() {
         const declStr = declaration === true ? 'tengo' : declaration === false ? 'no_tengo' : 'puede';
         try { 
           makeDeclaration(playerIndex, declStr, 'PARES');
-          // Auto-declarations don't wait - they proceed immediately
-          if (declaration === 'puede') {
-            nextPlayer();
-            startPlayerTurnTimer(gameState.activePlayerIndex);
-          }
+          // Server will handle turn advancement via socket events
         } catch (e) { 
           console.error('[handleParesDeclaration] Error calling makeDeclaration:', e);
         }
