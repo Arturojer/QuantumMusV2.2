@@ -80,6 +80,13 @@ document.addEventListener('DOMContentLoaded', () => {
           const firstIsHost = (gameState.players[0] && gameState.players[0].name === gameState.playerName) ||
             (data.room.players && data.room.players[0] && data.room.players[0].name === gameState.playerName);
           gameState.players = mapRoomPlayersToLocal(data.room.players || [], firstIsHost);
+          
+          // Update game mode if it changed
+          if (data.room.game_mode && data.room.game_mode !== gameState.gameMode) {
+            gameState.gameMode = data.room.game_mode;
+            setupGameSettings(); // Refresh the game settings UI
+          }
+          
           updatePlayersList();
           updateStartButton();
         }
@@ -504,6 +511,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   hostButton.addEventListener('click', () => {
     gameState.isHost = true;
+    // Ensure default game mode is set to '8' for online mode
+    if (!gameState.gameMode) {
+      gameState.gameMode = '8';
+    }
     initSocket((connected) => {
       if (connected) {
         emitCreateRoom();
@@ -653,18 +664,25 @@ document.addEventListener('DOMContentLoaded', () => {
     
     if (!settingsPanel) return;
     
-    // Initialize gameMode from checked radio button
-    const checkedRadio = document.querySelector('input[name="game-mode"]:checked');
-    if (checkedRadio) {
-      gameState.gameMode = checkedRadio.value;
-      console.log(`Initial game mode set to: ${checkedRadio.value} reyes`);
-      
-      // Show/hide entanglement info based on initial selection
-      if (checkedRadio.value === '8') {
-        entanglementInfo.classList.add('show');
-      } else {
-        entanglementInfo.classList.remove('show');
-      }
+    // If gameState.gameMode is already set (from server or previous state), use it
+    // Otherwise, check which radio is checked and use that, defaulting to '8'
+    if (!gameState.gameMode) {
+      const checkedRadio = document.querySelector('input[name="game-mode"]:checked');
+      gameState.gameMode = checkedRadio ? checkedRadio.value : '8';
+    }
+    
+    // Update radio buttons to match gameState.gameMode
+    gameModeRadios.forEach(radio => {
+      radio.checked = (radio.value === gameState.gameMode);
+    });
+    
+    console.log(`Game mode set to: ${gameState.gameMode} reyes`);
+    
+    // Show/hide entanglement info based on current game mode
+    if (gameState.gameMode === '8') {
+      entanglementInfo.classList.add('show');
+    } else {
+      entanglementInfo.classList.remove('show');
     }
     
     // Host can choose 4 or 8 kings; non-hosts see disabled panel
@@ -688,14 +706,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         console.log(`Game mode changed to: ${e.target.value} reyes`);
-      });
-      
-      // Set initial state
-      if (radio.value === gameState.gameMode && radio.checked) {
-        if (radio.value === '8') {
-          entanglementInfo.classList.add('show');
+        
+        // If host and connected, send update to server
+        if (gameState.isHost && gameState.socket && gameState.socket.connected && gameState.roomId) {
+          gameState.socket.emit('update_game_mode', {
+            room_id: gameState.roomId,
+            game_mode: e.target.value
+          });
         }
-      }
+      });
     });
   }
 
@@ -944,7 +963,8 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
     
-    window.currentGameMode = gameState.gameMode;
+    // In online mode, default to '8' (8 reyes) if gameMode is not specified
+    window.currentGameMode = gameState.gameMode || '8';
     window.currentPlayers = interleavedPlayers.map(p => ({
       name: p.name || 'Player',
       character: p.character,

@@ -485,7 +485,8 @@ function initGame() {
   
   // Get players and game mode from lobby (set by initializeGame)
   const lobbyPlayers = window.currentPlayers || [];
-  const gameMode = window.currentGameMode || '4';
+  // In online mode, default to '8' (8 reyes), in offline mode default to '4'
+  const gameMode = window.currentGameMode || (window.onlineMode ? '8' : '4');
   const localPlayerIndex = window.currentLocalPlayerIndex ?? 0;
   
   console.log('Game Mode:', gameMode);
@@ -800,9 +801,9 @@ function initGame() {
         updateEntanglementState(gs.entanglement);
       }
       if (payload.game_state && payload.game_state.player_hands) {
-        renderHandsFromServer(payload.game_state.player_hands, payload.game_mode || window.currentGameMode || '4');
+        renderHandsFromServer(payload.game_state.player_hands, payload.game_mode || window.currentGameMode || (window.onlineMode ? '8' : '4'));
       } else if (payload.player_hands) {
-        renderHandsFromServer(payload.player_hands, payload.game_mode || window.currentGameMode || '4');
+        renderHandsFromServer(payload.player_hands, payload.game_mode || window.currentGameMode || (window.onlineMode ? '8' : '4'));
       }
       updateManoIndicators();
       updateRoundDisplay();
@@ -1444,7 +1445,7 @@ function initGame() {
         
         // Update player hands from server and re-render
         if (data.player_hands) {
-          renderHandsFromServer(data.player_hands, window.currentGameMode || '4');
+          renderHandsFromServer(data.player_hands, window.currentGameMode || (window.onlineMode ? '8' : '4'));
         }
         
         // Remove discard button if it exists
@@ -6310,6 +6311,11 @@ function initGame() {
   }
 
   function createCard(value, suit, suitSymbol, index, isCurrentPlayer, isTeammate, suitColor, playerIndex, gameMode = '4') {
+    // Log gameMode for debugging
+    if (playerIndex === 0 && index === 0) {
+      console.log(`[CREATE CARD] Creating cards with gameMode: ${gameMode}, value: ${value}, onlineMode: ${window.onlineMode}`);
+    }
+    
     const card = document.createElement('div');
     const isLateralPlayer = playerIndex === 1 || playerIndex === 3;
     card.className = `quantum-card card-${suit} card-dealing${isLateralPlayer ? ' card-lateral' : ''}${playerIndex === 3 ? ' card-left' : ''}`;
@@ -6338,13 +6344,13 @@ function initGame() {
     let isEntangled = false;
     let isSuperposed = false;
     
-    // A and K are ALWAYS entangled with each other (A↔K)
-    // 2 and 3 are ALWAYS entangled with each other (2↔3)
+    // A and K are ALWAYS entangled with each other (A↔K) in both 4 and 8 reyes
+    // 2 and 3 are entangled with each other (2↔3) ONLY in 8 reyes mode
     // J and Q are NEVER entangled
     const is8Reyes = gameMode === '8';
     if (value === 'A' || value === 'K') {
       isEntangled = true;
-    } else if (value === '2' || value === '3') {
+    } else if (is8Reyes && (value === '2' || value === '3')) {
       isEntangled = true;
     }
     // Superposition disabled - all other cards (including J, Q) are regular

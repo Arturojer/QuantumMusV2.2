@@ -458,7 +458,7 @@ def create_room():
     """Create a new game room"""
     data = request.json
     room_name = data.get('name', 'Quantum Room')
-    game_mode = data.get('game_mode', '4')
+    game_mode = data.get('game_mode', '8')
     max_players = 4
     # Instrumentation: measure server processing time for room creation
     recv_ts = time.time()
@@ -547,7 +547,7 @@ def handle_create_room(data):
     # Instrumentation: measure server-side receive -> response time
     recv_ts = time.time()
     room_name = data.get('name', 'Quantum Room')
-    game_mode = data.get('game_mode', '4')
+    game_mode = data.get('game_mode', '8')
 
     room = room_manager.create_room(room_name, game_mode, 4)
 
@@ -632,6 +632,35 @@ def handle_set_character(data):
         }, room=room_id)
     else:
         emit('game_error', {'error': 'Failed to update character'})
+
+@socketio.on('update_game_mode')
+def handle_update_game_mode(data):
+    """Update game mode in the room (host only)"""
+    room_id = data.get('room_id')
+    game_mode = data.get('game_mode')
+    
+    if game_mode not in ['4', '8']:
+        emit('game_error', {'error': 'Invalid game mode. Must be "4" or "8"'})
+        return
+    
+    room = room_manager.get_room(room_id)
+    if not room:
+        emit('game_error', {'error': 'Room not found'})
+        return
+    
+    # Only host can change game mode
+    if room['players'] and room['players'][0]['socket_id'] != request.sid:
+        emit('game_error', {'error': 'Only the host can change game mode'})
+        return
+    
+    # Update game mode
+    room['game_mode'] = game_mode
+    logger.info(f"Room {room_id} game mode updated to: {game_mode}")
+    
+    # Notify all players
+    socketio.emit('room_updated', {
+        'room': room
+    }, room=room_id)
 
 @socketio.on('join_room_by_code')
 def handle_join_room_by_code(data):
