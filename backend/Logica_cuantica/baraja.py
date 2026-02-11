@@ -1,5 +1,6 @@
 import numpy as np
 from typing import List, Tuple, Dict
+from qiskit import QuantumCircuit
 from qiskit_aer import AerSimulator
 from .cartas import QuantumCard
 
@@ -27,7 +28,20 @@ class QuantumDeck:
         11: '1001', 12: '1010'
     }
 
-    def __init__(self, enable_king_pit_entanglement: bool = True, enable_two_three_entanglement: bool = True):
+    def __init__(self, game_mode='4', enable_king_pit_entanglement: bool = True, enable_two_three_entanglement: bool = None):
+        """
+        Initialize QuantumDeck with entanglement options
+        
+        Args:
+            game_mode: '4' for 4 reyes (only K/Pito entangled), '8' for 8 reyes (K/Pito and 3/2 entangled)
+            enable_king_pit_entanglement: Enable Rey-Pito entanglement
+            enable_two_three_entanglement: Enable Tres-Dos entanglement (auto-set based on game_mode if None)
+        """
+        # Auto-configure entanglement based on game mode if not explicitly set
+        if enable_two_three_entanglement is None:
+            enable_two_three_entanglement = (game_mode == '8')
+        
+        self.game_mode = game_mode
         self.cards = self._create_deck()
         self.deck_index = 0
         self.simulator = AerSimulator()
@@ -52,10 +66,56 @@ class QuantumDeck:
                 card_id += 1
         return cards
 
+    def _generate_quantum_random_bits(self, num_bits: int) -> List[int]:
+        """Generate random bits using quantum measurement"""
+        qc = QuantumCircuit(num_bits, num_bits)
+        # Apply Hadamard to all qubits to create superposition
+        for i in range(num_bits):
+            qc.h(i)
+        # Measure all qubits
+        qc.measure(range(num_bits), range(num_bits))
+        
+        # Execute circuit
+        job = self.simulator.run(qc, shots=1)
+        result = job.result()
+        counts = result.get_counts()
+        
+        # Get the measurement result (binary string)
+        bitstring = list(counts.keys())[0]
+        # Convert to list of ints (reverse to match qubit order)
+        return [int(b) for b in reversed(bitstring)]
+    
+    def _quantum_fisher_yates_shuffle(self, items: List) -> List:
+        """Shuffle using quantum random numbers with Fisher-Yates algorithm"""
+        n = len(items)
+        shuffled = items.copy()
+        
+        for i in range(n - 1, 0, -1):
+            # Calculate number of bits needed to represent i
+            bits_needed = i.bit_length()
+            
+            # Generate quantum random number in range [0, i]
+            while True:
+                random_bits = self._generate_quantum_random_bits(bits_needed)
+                # Convert bits to integer
+                j = sum(bit * (2 ** idx) for idx, bit in enumerate(random_bits))
+                if j <= i:
+                    break
+            
+            # Swap elements
+            shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+        
+        return shuffled
+
     def shuffle(self, seed: int = None):
+        """Shuffle deck using quantum randomness"""
         if seed is not None:
+            # For testing/reproducibility, use classical numpy
             np.random.seed(seed)
-        np.random.shuffle(self.cards)
+            np.random.shuffle(self.cards)
+        else:
+            # Use quantum shuffle
+            self.cards = self._quantum_fisher_yates_shuffle(self.cards)
         self.deck_index = 0
 
     def draw(self, num_cards: int = 1) -> List[QuantumCard]:
@@ -67,7 +127,13 @@ class QuantumDeck:
         return drawn
 
     def reset(self):
+        """Reset deck index"""
         self.deck_index = 0
+    
+    def reset_entanglement_states(self):
+        """Reset entanglement collapse caches for new hand - cards return to entangled state"""
+        self.king_pit_collapsed = {}
+        self.tres_dos_collapsed = {}
 
     def get_deck_info(self) -> dict:
         return {

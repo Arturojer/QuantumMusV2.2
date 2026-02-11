@@ -6581,7 +6581,7 @@ function initGame() {
         if (gameState.currentBet.betType === 'ordago') {
           console.log('[ORDAGO RESPONSE] Only PASO and ACCEPT buttons available - hiding ENVIDO button');
           if (button1Label) button1Label.textContent = 'ORDAGO';
-          if (button2Label) button2Label.textContent = 'COUNTER';
+          // Don't set COUNTER label when responding to ordago - button will be hidden anyway
           buttons[0].style.display = 'none'; // Hide button 0 (MUS/TENGO) - not applicable during ordago response
           buttons[1].style.display = 'none'; // Hide ENVIDO/COUNTER (can't counter ORDAGO)
           buttons[4].style.display = 'none'; // Hide ÓRDAGO button (already in ORDAGO)
