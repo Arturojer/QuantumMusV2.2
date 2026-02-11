@@ -1181,8 +1181,12 @@ function initGame() {
         const roundName = data.round_name;
         const declaration = data.declaration;
         const penalty = data.penalty;
+        const collapseEvent = data.collapse_event;
         
         console.log(`[ONLINE] Cards collapsed for player ${localIdx + 1} in ${roundName}, penalty:`, penalty);
+        
+        // Trigger collapse animation for the player who declared (if it's the local player)
+        const showAnimation = localIdx === 0;
         
         // Update hands from server
         if (data.updated_hands) {
@@ -1196,19 +1200,49 @@ function initGame() {
               const cardsRow = playerZone.querySelector('.cards-row');
               const cards = cardsRow.querySelectorAll('.quantum-card');
               
+              // Collect cards to collapse with animation
+              const cardsToCollapse = [];
+              
               hand.forEach((cardData, cardIdx) => {
                 if (cards[cardIdx]) {
+                  const mappedCard = mapBackendCardToFrontend(cardData);
+                  const wasEntangled = cards[cardIdx].dataset.entangled === 'true';
+                  const wasCollapsed = cards[cardIdx].dataset.collapsed === 'true';
+                  
+                  // If this card was entangled and is now collapsed, add to animation
+                  if (wasEntangled && !wasCollapsed && localPlayerIdx === localIdx) {
+                    cardsToCollapse.push({
+                      cardElement: cards[cardIdx],
+                      finalValue: mappedCard.value,
+                      cardIndex: cardIdx
+                    });
+                  }
+                  
                   // Update card value display
                   const cardTop = cards[cardIdx].querySelector('.card-top');
                   const decoration = cards[cardIdx].querySelector('.quantum-decoration');
                   if (cardTop && decoration) {
-                    const mappedCard = mapBackendCardToFrontend(cardData);
                     decoration.textContent = mappedCard.value;
                     // Mark as collapsed
                     cards[cardIdx].dataset.collapsed = 'true';
+                    cards[cardIdx].dataset.value = mappedCard.value;
+                    cards[cardIdx].dataset.entangled = 'false';
                   }
                 }
               });
+              
+              // Trigger collapse animation for local player
+              if (showAnimation && cardsToCollapse.length > 0 && localPlayerIdx === localIdx) {
+                console.log(`[ONLINE] Triggering collapse animation for ${cardsToCollapse.length} cards`);
+                window.quantumCollapse.collapseMultipleCards(cardsToCollapse, () => {
+                  console.log(`[ONLINE] Collapse animation complete`);
+                  // Update partner cards
+                  collapsePartnerCards(cardsToCollapse, localPlayerIdx);
+                });
+              } else if (localPlayerIdx === localIdx && cardsToCollapse.length > 0) {
+                // No animation but still collapse partners
+                collapsePartnerCards(cardsToCollapse, localPlayerIdx);
+              }
             }
           });
         }
@@ -8488,15 +8522,15 @@ function applyEntanglementGlows(playerState) {
     if (teammateZone) {
       const teammateCards = teammateZone.querySelectorAll('.quantum-card');
       
-      // For each pair, mark a card in teammate's hand
-      // Since we don't know which specific card, we mark based on position
-      glowData.pairs.forEach((pair, pairIdx) => {
-        // Mark the first N cards where N is number of pairs
-        if (teammateCards[pairIdx]) {
-          const card = teammateCards[pairIdx];
+      // For each pair, mark the specific card in teammate's hand
+      glowData.pairs.forEach((pair) => {
+        // Use the specific teammate_card_index from backend
+        if (pair.teammate_card_index !== undefined && teammateCards[pair.teammate_card_index]) {
+          const card = teammateCards[pair.teammate_card_index];
           card.classList.add('entangled-card', 'teammate-entangled');
           const suitColor = card.dataset.suitColor || '#a78bfa'; // Different color for teammate
           card.style.setProperty('--entangle-color', suitColor);
+          console.log(`[GLOW] ✨ Applied glow to teammate card at index ${pair.teammate_card_index}`);
         }
       });
       
