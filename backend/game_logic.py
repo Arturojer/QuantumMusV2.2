@@ -855,13 +855,27 @@ class QuantumMusGame:
         return None
     
     def _has_pares(self, hand):
-        """Check if a hand has pares (all cards must be collapsed)"""
+        """Check if a hand has pares (all cards must be collapsed)
+        
+        In mode 8, applies value equivalence:
+        - A and 2 are equivalent (form pairs together)
+        - 3 and K are equivalent (form pairs together)
+        """
+        def normalizeValueForPares(val):
+            """Normalize card values for pair checking in mode 8"""
+            if self.game_mode == '8':
+                if val == 'A': return '2'  # A and 2 form pairs
+                if val == '3': return 'K'  # 3 and K form pairs
+            return val
+        
         value_counts = {}
         for card in hand:
             value = getattr(card, 'value', None)
             if value is None:
                 continue
-            value_counts[value] = value_counts.get(value, 0) + 1
+            # Normalize value for mode 8
+            normalized_value = normalizeValueForPares(value)
+            value_counts[normalized_value] = value_counts.get(normalized_value, 0) + 1
         
         return any(count >= 2 for count in value_counts.values())
     
