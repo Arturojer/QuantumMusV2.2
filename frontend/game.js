@@ -6398,6 +6398,19 @@ function initGame() {
     if (team2ScoreEl) team2ScoreEl.textContent = gameState.teams.team2.score;
     if (roundEl) roundEl.textContent = gameState.currentRound;
     
+    // Check if any team reached 40 points - game over
+    if (gameState.teams.team1.score >= 40) {
+      console.log('[GAME OVER] Team 1 reached 40 points');
+      freezeGameState();
+      setTimeout(() => showGameOver('team1'), 1000);
+      return;
+    } else if (gameState.teams.team2.score >= 40) {
+      console.log('[GAME OVER] Team 2 reached 40 points');
+      freezeGameState();
+      setTimeout(() => showGameOver('team2'), 1000);
+      return;
+    }
+    
     // Recalculate and update probabilities for Pares and Juego
     const player1Cards = document.querySelectorAll('#player1-zone .quantum-card');
     const cardValues = [];
