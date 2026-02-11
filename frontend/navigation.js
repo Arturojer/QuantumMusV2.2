@@ -901,18 +901,46 @@ document.addEventListener('DOMContentLoaded', () => {
 
   window.addEventListener('onlineGameStarted', (e) => {
     const detail = e.detail || {};
-    const localIndex = gameState.playerIndex != null ? gameState.playerIndex : 0;
+    const serverGameState = detail.game_state || {};
+    
+    // CRITICAL: Use the interleaved player order from the server
+    // The backend has rearranged players so teams alternate (Team1, Team2, Team1, Team2)
+    // This ensures teammates face each other at positions 0&2 and 1&3
+    const interleavedPlayers = serverGameState.players || gameState.players;
+    
+    // Find our position in the interleaved order
+    const mySocketId = gameState.socket?.id;
+    const myOriginalIndex = gameState.playerIndex != null ? gameState.playerIndex : 0;
+    
+    // Find where we are in the interleaved player list
+    let localIndex = myOriginalIndex;
+    if (interleavedPlayers) {
+      const foundIndex = interleavedPlayers.findIndex(p => 
+        p.socket_id === mySocketId || p.index === myOriginalIndex
+      );
+      if (foundIndex >= 0) {
+        localIndex = foundIndex;
+      }
+    }
+    
     window.currentGameMode = gameState.gameMode;
-    window.currentPlayers = gameState.players;
+    window.currentPlayers = interleavedPlayers.map(p => ({
+      name: p.name || 'Player',
+      character: p.character,
+      team: p.team,
+      color: characters.find(c => c.id === p.character)?.color
+    }));
     window.currentLocalPlayerIndex = localIndex;
     window.onlineMode = true;
     window.roomId = gameState.roomId;
-    window.initialServerState = detail.game_state || {};
+    window.initialServerState = serverGameState;
+    
     console.log('[ONLINE] onlineGameStarted event received:', {
       gameMode: window.currentGameMode,
       players: window.currentPlayers,
       localIndex,
       roomId: window.roomId,
+      interleavedOrder: window.currentPlayers.map(p => `${p.character}(T${p.team})`),
       initialServerState: window.initialServerState
     });
     showScreen('game');
