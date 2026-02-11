@@ -861,20 +861,14 @@ function initGame() {
             gameState.teams.team2.score = st.teams.team2?.score ?? 0;
           }
           
-          // Freeze game state
-          freezeGameState();
-          
           // Collapse and reveal all cards
           collapseAllRemaining().then(() => {
             revealAllCards(true);
             
-            // Show game over with ordago winner
+            // Show game over with ordago winner (showGameOver will freeze state)
             setTimeout(() => {
-              const winnerTeam = data.result.winner_team === 'team1' ? 1 : 2;
-              showGameOver(winnerTeam, {
-                team1: gameState.teams.team1.score,
-                team2: gameState.teams.team2.score
-              }, { rounds: 0 });
+              const winnerTeam = data.result.winner_team; // Already in 'team1' or 'team2' format
+              showGameOver(winnerTeam);
             }, 2000);
           });
           
@@ -1058,10 +1052,11 @@ function initGame() {
       }
     });
     socket.on('game_ended', (data) => {
-      if (data.winner && typeof window.showGameOver === 'function') {
-        const winnerTeam = data.winner === 'team1' ? 1 : 2;
-        const fs = data.final_scores || {};
-        window.showGameOver(winnerTeam, { team1: fs.team1 || 0, team2: fs.team2 || 0 }, { rounds: 0 });
+      console.log('[ONLINE] Game ended event received:', data);
+      freezeGameState();
+      if (data.winner) {
+        const winnerTeam = data.winner; // Already in 'team1' or 'team2' format
+        setTimeout(() => showGameOver(winnerTeam), 1000);
       }
     });
     socket.on('declaration_made', (data) => {
@@ -2202,14 +2197,12 @@ function initGame() {
           }
           gameState.teams[gameState.currentBet.bettingTeam].score += points;
           console.log(`Team ${gameState.currentBet.bettingTeam} wins ${points} points (bet rejected in ${gameState.currentRound})`);
-          showTeamPointAward(gameState.currentBet.bettingTeam, points, 'rejected');
+          showTeamPointAward(gameState.currentBet.bettingTeam, points, 'rechazado');
           updateScoreboard();
           
-          // Check for game over
+          // Check for game over (updateScoreboard will handle the check and call showGameOver)
           if (gameState.teams[gameState.currentBet.bettingTeam].score >= 40) {
-            freezeGameState();
-            showGameOver(gameState.currentBet.bettingTeam);
-            return;
+            return; // updateScoreboard already triggered game over
           }
           
           // Move to next round after bet rejection (applies to both regular bets and ORDAGO)
@@ -2316,15 +2309,14 @@ function initGame() {
       if (gameState.currentBet.betType === 'ordago') {
         // ORDAGO accepted - collapse all remaining cards, determine winner, end game
         console.log(`[ORDAGO ACCEPT] Player ${playerIndex + 1} accepted ORDAGO - collapsing all cards`);
-        freezeGameState();
         // Collapse all remaining cards and wait for animations to finish
           collapseAllRemaining().then(() => {
             revealAllCards(true);
           setTimeout(() => {
             const roundWinner = calculateRoundWinner();
             console.log(`[ORDAGO] ${roundWinner} wins ${gameState.currentRound} round - game over!`);
-            // Set winning team's score to 40+ to trigger victory
-            gameState.teams[roundWinner].score = 40;
+            // Award 40 points and show game over (which will freeze state)
+            gameState.teams[roundWinner].score += 40;
             showGameOver(roundWinner);
           }, 2000);
         });
@@ -3922,15 +3914,9 @@ function initGame() {
       // Update scoreboard with final scores
       updateScoreboard();
 
-      // Check if any team reached winning score
-      if (gameState.teams.team1.score >= 40) {
-        freezeGameState(); // Stop all timers and interactions
-        showGameOver('team1');
-        return;
-      } else if (gameState.teams.team2.score >= 40) {
-        freezeGameState(); // Stop all timers and interactions
-        showGameOver('team2');
-        return;
+      // Check if any team reached winning score (updateScoreboard will handle showing game over)
+      if (gameState.teams.team1.score >= 40 || gameState.teams.team2.score >= 40) {
+        return; // Game is over, updateScoreboard handled it
       }
 
       // Reset pending points for next hand
@@ -4582,8 +4568,12 @@ function initGame() {
   }
 
   // Show game over panel with winner
+  // Show game over panel with winner
   function showGameOver(winningTeam) {
-    console.log(`Game Over! Winner: ${winningTeam}`);
+    console.log(`[GAME OVER] Winner: ${winningTeam}`);
+    
+    // Ensure game is frozen first
+    freezeGameState();
     
     const team1Score = gameState.teams.team1.score;
     const team2Score = gameState.teams.team2.score;
@@ -4688,6 +4678,9 @@ function initGame() {
       }
     });
   }
+  
+  // Make showGameOver available globally for online mode
+  window.showGameOver = showGameOver;
   
   // Update scoreboard with current round
   function updateRoundDisplay() {
@@ -6401,12 +6394,10 @@ function initGame() {
     // Check if any team reached 40 points - game over
     if (gameState.teams.team1.score >= 40) {
       console.log('[GAME OVER] Team 1 reached 40 points');
-      freezeGameState();
       setTimeout(() => showGameOver('team1'), 1000);
       return;
     } else if (gameState.teams.team2.score >= 40) {
       console.log('[GAME OVER] Team 2 reached 40 points');
-      freezeGameState();
       setTimeout(() => showGameOver('team2'), 1000);
       return;
     }
