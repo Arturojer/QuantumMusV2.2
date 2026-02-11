@@ -294,6 +294,17 @@ class QuantumMusGame:
                     'responses': {}
                 }
         
+        # Include phase information for frontend to determine button visibility
+        phase_info = {}
+        if self.state.get('grandePhase'):
+            phase_info['grandePhase'] = self.state['grandePhase']
+        if self.state.get('chicaPhase'):
+            phase_info['chicaPhase'] = self.state['chicaPhase']
+        if self.state.get('paresPhase'):
+            phase_info['paresPhase'] = self.state['paresPhase']
+        if self.state.get('juegoPhase'):
+            phase_info['juegoPhase'] = self.state['juegoPhase']
+        
         return {
             'room_id': self.room_id,
             'game_mode': self.game_mode,
@@ -304,7 +315,8 @@ class QuantumMusGame:
                 'manoIndex': self.state['manoIndex'],
                 'teams': self.state['teams'],
                 'currentBet': self.state['currentBet'],
-                'waitingForDiscard': self.state['waitingForDiscard']
+                'waitingForDiscard': self.state['waitingForDiscard'],
+                **phase_info  # Include phase details for button logic
             },
             'players': self.players,
             'hand_sizes': {i: len(cards) for i, cards in self.hands.items()}
