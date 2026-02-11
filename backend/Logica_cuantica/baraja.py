@@ -43,15 +43,16 @@ class QuantumDeck:
             enable_two_three_entanglement = (game_mode == '8')
         
         self.game_mode = game_mode
+        self.enable_king_pit_entanglement = enable_king_pit_entanglement
+        self.enable_two_three_entanglement = enable_two_three_entanglement
+        
+        # Initialize cards AFTER setting entanglement flags
         self.cards = self._create_deck()
         self.deck_index = 0
         self.simulator = AerSimulator()
         
         # Use quantum RNG for all random operations
         self.qrng = QuantumRNG()
-
-        self.enable_king_pit_entanglement = enable_king_pit_entanglement
-        self.enable_two_three_entanglement = enable_two_three_entanglement
 
         # Cache del colapso Rey-Pito: palo -> (estado_rey, estado_pito)
         # Estados en 6 bits (q0..q5): [palo(2)][valor(4)]
@@ -66,9 +67,49 @@ class QuantumDeck:
         card_id = 0
         for palo in self.PALOS:
             for valor in self.VALORES:
-                cards.append(QuantumCard(palo, valor, card_id))
+                cards.append(QuantumCard(palo, valor, card_id, game_mode=self.game_mode))
                 card_id += 1
+        
+        # Crear estados de Bell para cartas entrelazadas
+        self._create_bell_states(cards)
+        
         return cards
+    
+    def _create_bell_states(self, cards: List[QuantumCard]):
+        """
+        Crear estados de Bell auténticos para pares entrelazados.
+        
+        En modo '4': Solo Reyes (K) están entrelazados
+        En modo '8': Reyes (K), Treses (3), y Doses (2) están entrelazados
+        
+        Entrelazamiento por equipos:
+        - Equipo 1: Oro ↔ Copa
+        - Equipo 2: Espada ↔ Basto
+        """
+        # Mapear cartas por (palo, valor) para fácil acceso
+        card_map = {}
+        for card in cards:
+            key = (card.palo, card.valor)
+            card_map[key] = card
+        
+        # Función auxiliar para entrelazar un par
+        def entangle_pair(valor: int, palo1: str, palo2: str):
+            card1 = card_map.get((palo1, valor))
+            card2 = card_map.get((palo2, valor))
+            if card1 and card2:
+                card1.create_bell_pair(card2)
+        
+        # Reyes (12) - Siempre entrelazados en ambos modos
+        if self.enable_king_pit_entanglement:
+            entangle_pair(12, 'Oro', 'Copa')      # Equipo 1
+            entangle_pair(12, 'Espada', 'Basto')  # Equipo 2
+        
+        # Treses (3) y Doses (2) - Solo en modo 8
+        if self.enable_two_three_entanglement and self.game_mode == '8':
+            entangle_pair(3, 'Oro', 'Copa')       # Equipo 1
+            entangle_pair(3, 'Espada', 'Basto')   # Equipo 2
+            entangle_pair(2, 'Oro', 'Copa')       # Equipo 1
+            entangle_pair(2, 'Espada', 'Basto')   # Equipo 2
 
     def shuffle(self, seed: int = None):
         """
@@ -109,9 +150,15 @@ class QuantumDeck:
         self.deck_index = 0
     
     def reset_entanglement_states(self):
-        """Reset entanglement collapse caches for new hand - cards return to entangled state"""
+        """
+        Reset entanglement collapse caches for new hand - cards return to entangled state.
+        Recrea los estados de Bell para las cartas entrelazadas.
+        """
         self.king_pit_collapsed = {}
         self.tres_dos_collapsed = {}
+        
+        # Recrear estados de Bell para todas las cartas entrelazadas
+        self._create_bell_states(self.cards)
 
     def get_deck_info(self) -> dict:
         return {
