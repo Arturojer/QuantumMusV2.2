@@ -885,6 +885,19 @@ function initGame() {
         }
         gameState.currentBet = st.currentBet || gameState.currentBet;
         
+        // Show action notification for received actions
+        if (data.action && typeof data.action.player_index !== 'undefined') {
+          const actionPlayerIdx = serverToLocal(data.action.player_index);
+          const actionType = data.action.action;
+          const actionData = data.action.data || {};
+          
+          // Show notification for all player actions
+          if (actionType && typeof showActionNotification === 'function') {
+            console.log(`[ONLINE] Showing notification for ${actionType} by player ${actionPlayerIdx + 1}`);
+            showActionNotification(actionPlayerIdx, actionType, actionData);
+          }
+        }
+        
         // Clear MUS bet pending flag when processing betting responses in GRANDE
         if (gameState.currentRound === 'GRANDE' && gameState._musBetPending && data.action) {
           const actionType = data.action.action;
@@ -897,16 +910,34 @@ function initGame() {
         const previousWaiting = gameState.waitingForDiscard;
         gameState.waitingForDiscard = !!st.waitingForDiscard;
         if (gameState.waitingForDiscard && !previousWaiting) {
-          // Just entered discard phase - start simultaneous timer for all players
-          console.log('[ONLINE] Entering discard phase - starting 10s timer for all players');
+          // Just entered discard phase - start simultaneous timer for all players IMMEDIATELY
+          console.log('[ONLINE] Entering discard phase - starting 10s timer for all players NOW');
           gameState.roundActions = {};
           gameState.cardsDiscarded = {}; // Reset discard tracking
+          
+          // Clear any existing timers first
+          if (timerInterval) {
+            clearTimeout(timerInterval);
+            timerInterval = null;
+          }
+          if (aiDecisionTimeout) {
+            clearTimeout(aiDecisionTimeout);
+            aiDecisionTimeout = null;
+          }
+          
+          // Show discard UI and start timer synchronously
           showDiscardUI();
           startAllPlayersTimer(10);
         } else if (previousWaiting && !gameState.waitingForDiscard) {
           // Exiting discard phase
           const discardBtn = document.getElementById('discard-button');
           if (discardBtn) discardBtn.remove();
+          
+          // Show quantum gate controls again
+          const controls = document.querySelector('.scoreboard-controls');
+          if (controls) {
+            controls.style.display = 'flex';
+          }
         }
         // If server included declaration-phase metadata, apply it
         try {
@@ -988,8 +1019,10 @@ function initGame() {
         const localIdx = serverToLocal(data.player_index);
         console.log(`[ONLINE] Player ${localIdx + 1} discarded ${data.num_cards} cards`);
         
-        // Mark this player as having discarded
-        gameState.cardsDiscarded[localIdx] = new Array(data.num_cards).fill(0).map((_, i) => i);
+        // Mark this player as having discarded (if not already marked)
+        if (!gameState.cardsDiscarded[localIdx]) {
+          gameState.cardsDiscarded[localIdx] = new Array(data.num_cards).fill(0).map((_, i) => i);
+        }
         
         // Update UI to show visual feedback that this player discarded
         const playerId = `player${localIdx + 1}`;
@@ -998,9 +1031,38 @@ function initGame() {
           const cards = playerZone.querySelectorAll('.quantum-card');
           cards.forEach((card, idx) => {
             if (idx < data.num_cards) {
+              // Apply discard visual effect
+              try { 
+                if (card.classList.contains('entangled-card') || card.classList.contains('entangled-candidate')) {
+                  card.style.setProperty('animation', 'none', 'important');
+                }
+              } catch (e) {}
+              
               card.style.transform = 'translateY(-15px) scale(0.95)';
               card.style.filter = 'grayscale(100%) brightness(0.3)';
               card.style.transition = 'all 0.3s ease-out';
+              
+              // Add X overlay
+              let overlay = card.querySelector('.discard-overlay');
+              if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.className = 'discard-overlay';
+                overlay.style.cssText = `
+                  position: absolute;
+                  top: 50%;
+                  left: 50%;
+                  transform: translate(-50%, -50%);
+                  font-size: 4rem;
+                  color: #888888;
+                  font-weight: 900;
+                  text-shadow: 0 0 10px rgba(0, 0, 0, 0.6);
+                  z-index: 10;
+                  pointer-events: none;
+                  animation: fadeInX 0.3s ease-out;
+                `;
+                overlay.textContent = '✕';
+                card.appendChild(overlay);
+              }
             }
           });
         }
@@ -1770,16 +1832,45 @@ function initGame() {
       // Mark as discarded locally for immediate UI feedback
       gameState.cardsDiscarded[playerIndex] = cardIndices;
       
-      // Visual feedback: mark discarded cards immediately
+      // Visual feedback: mark discarded cards immediately WITH X OVERLAY
       const playerId = `player${playerIndex + 1}`;
       const playerZone = document.getElementById(`${playerId}-zone`);
       if (playerZone) {
         const cards = playerZone.querySelectorAll('.quantum-card');
         cardIndices.forEach(cardIndex => {
           if (cards[cardIndex]) {
+            // Apply discard visual effect
+            try { 
+              if (cards[cardIndex].classList.contains('entangled-card') || cards[cardIndex].classList.contains('entangled-candidate')) {
+                cards[cardIndex].style.setProperty('animation', 'none', 'important');
+              }
+            } catch (e) {}
+            
             cards[cardIndex].style.transform = 'translateY(-15px) scale(0.95)';
             cards[cardIndex].style.filter = 'grayscale(100%) brightness(0.3)';
             cards[cardIndex].style.transition = 'all 0.3s ease-out';
+            
+            // Add X overlay
+            let overlay = cards[cardIndex].querySelector('.discard-overlay');
+            if (!overlay) {
+              overlay = document.createElement('div');
+              overlay.className = 'discard-overlay';
+              overlay.style.cssText = `
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                font-size: 4rem;
+                color: #888888;
+                font-weight: 900;
+                text-shadow: 0 0 10px rgba(0, 0, 0, 0.6);
+                z-index: 10;
+                pointer-events: none;
+                animation: fadeInX 0.3s ease-out;
+              `;
+              overlay.textContent = '✕';
+              cards[cardIndex].appendChild(overlay);
+            }
           }
         });
       }
