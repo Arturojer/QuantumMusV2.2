@@ -6338,13 +6338,13 @@ function initGame() {
     let isEntangled = false;
     let isSuperposed = false;
     
-    // ONLY A and K are ALWAYS entangled with each other (in both 4 and 8 reyes)
-    // In 8 reyes mode: 2 and 3 are also entangled with each other
+    // A and K are ALWAYS entangled with each other (A↔K)
+    // 2 and 3 are ALWAYS entangled with each other (2↔3)
     // J and Q are NEVER entangled
     const is8Reyes = gameMode === '8';
     if (value === 'A' || value === 'K') {
       isEntangled = true;
-    } else if (is8Reyes && (value === '2' || value === '3')) {
+    } else if (value === '2' || value === '3') {
       isEntangled = true;
     }
     // Superposition disabled - all other cards (including J, Q) are regular
