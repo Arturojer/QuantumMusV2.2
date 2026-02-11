@@ -3044,7 +3044,7 @@ function initGame() {
       round_name: roundName
     });
     
-    // If tengo or no_tengo, trigger collapse
+    // If tengo or no_tengo, trigger collapse (wait for server response to advance turn)
     if (declaration === 'tengo' || declaration === 'no_tengo') {
       window.QuantumMusSocket.emit('trigger_declaration_collapse', {
         room_id: window.QuantumMusOnlineRoom,
@@ -3052,11 +3052,8 @@ function initGame() {
         declaration: declaration,
         round_name: roundName
       });
-    } else {
-      // For 'puede', just advance to next player
-      nextPlayer();
-      startPlayerTurnTimer(gameState.activePlayerIndex);
     }
+    // For 'puede', no collapse happens - turn advancement will be handled by proceedWithParesDeclaration
   }
   
   function handleParesDeclaration(playerIndex, declaration, isAutoDeclared = false) {
@@ -3084,9 +3081,12 @@ function initGame() {
         const declStr = declaration === true ? 'tengo' : declaration === false ? 'no_tengo' : 'puede';
         try { 
           makeDeclaration(playerIndex, declStr, 'PARES');
-          // For tengo/no_tengo, wait for server collapse response
-          // For puede, makeDeclaration will advance the turn
-          if (declaration !== 'puede') {
+          // For tengo/no_tengo, wait for server collapse response before advancing
+          // For puede, advance immediately after sending declaration
+          if (declaration === 'puede') {
+            nextPlayer();
+            startPlayerTurnTimer(gameState.activePlayerIndex);
+          } else {
             window._waitingServerDeclaration = { playerIndex, roundName: 'PARES', ts: Date.now() };
           }
         } catch (e) { 
@@ -3106,6 +3106,11 @@ function initGame() {
         const declStr = declaration === true ? 'tengo' : declaration === false ? 'no_tengo' : 'puede';
         try { 
           makeDeclaration(playerIndex, declStr, 'PARES');
+          // Auto-declarations don't wait - they proceed immediately
+          if (declaration === 'puede') {
+            nextPlayer();
+            startPlayerTurnTimer(gameState.activePlayerIndex);
+          }
         } catch (e) { 
           console.error('[handleParesDeclaration] Error calling makeDeclaration:', e);
         }
@@ -3121,7 +3126,7 @@ function initGame() {
     if (Object.keys(gameState.paresDeclarations).length < 4) {
       // Still need more declarations - move to next player
       if (!isAutoDeclared && !isOnlineGame) {
-        // Local mode only - online mode handles turn advancement via socket events
+        // Local mode only - online mode handles turn advancement via socket events or above
         proceedWithParesDeclaration();
       }
       return;
@@ -5596,19 +5601,25 @@ function initGame() {
       console.log(`[DISCARD BUTTON DEBUG] Found ${cards.length} cards in ${playerZoneId}`);
       
       cards.forEach((card, index) => {
-        const isSelected = String(card.dataset.selected).trim() === 'true';
-        console.log(`[DISCARD BUTTON DEBUG] Card ${index}: dataset.selected="${card.dataset.selected}" isSelected=${isSelected}`);
+        // Read both getAttribute and dataset to be safe
+        const datasetValue = card.dataset.selected;
+        const attrValue = card.getAttribute('data-selected');
+        const isSelected = String(datasetValue || attrValue || 'false').trim() === 'true';
+        console.log(`[DISCARD BUTTON DEBUG] Card ${index}: dataset="${datasetValue}" attr="${attrValue}" isSelected=${isSelected}`);
         if (isSelected) {
           selectedCards.push(index);
         }
       });
       
-      // Discard logic: 
-      // - If cards are selected, discard only those
-      // - If no cards selected, discard all 4 cards
-      const cardsToDiscard = (selectedCards.length === 0) ? [0, 1, 2, 3] : selectedCards;
+      // Require at least one card to be selected (don't auto-discard all if none selected)
+      if (selectedCards.length === 0) {
+        console.warn('[DISCARD BUTTON] No cards selected - user must select at least one card');
+        // Show error message
+        showTemporaryMessage('Selecciona al menos una carta para descartar', 2000);
+        return;
+      }
       
-      console.log(`[DISCARD BUTTON] Selected ${selectedCards.length} cards, discarding:`, cardsToDiscard);
+      console.log(`[DISCARD BUTTON] Selected ${selectedCards.length} cards, discarding:`, selectedCards);
       
       // Disable discard button to prevent double-clicks
       discardBtn.disabled = true;
@@ -5616,7 +5627,7 @@ function initGame() {
       discardBtn.style.pointerEvents = 'none';
       
       // Discard selected cards
-      handleDiscard(localPlayerIdx, cardsToDiscard);
+      handleDiscard(localPlayerIdx, selectedCards);
       
       // Remove discard button
       setTimeout(() => discardBtn.remove(), 100);
@@ -6632,6 +6643,33 @@ function initGame() {
         notification.remove();
       }, 300);
     }, 2000);
+  }
+
+  // Show temporary message to user
+  function showTemporaryMessage(message, duration = 2000) {
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(255, 67, 54, 0.95);
+      color: white;
+      padding: 20px 30px;
+      border-radius: 10px;
+      font-size: 1.2rem;
+      font-weight: 600;
+      z-index: 10000;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      animation: fadeIn 0.3s ease-out;
+    `;
+    notification.textContent = message;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+      notification.style.animation = 'fadeOut 0.3s ease-out';
+      setTimeout(() => notification.remove(), 300);
+    }, duration);
   }
 
   function showActionNotification(playerIndex, action, extraData = {}) {
