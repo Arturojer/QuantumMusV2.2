@@ -2910,33 +2910,23 @@ function initGame() {
     } else {
       // Cartas visibles del jugador actual - todas con dos números en esquinas
       
-      // Top right label - 3 symbols for entangled cards
+      // Top right label
       const topLabel = document.createElement('div');
       topLabel.className = `dirac-label card-top${(playerIndex === 1 || playerIndex === 3) ? ' label-flipped' : ''}`;
       topLabel.style.color = suitColor;
-      
-      if (isEntangled) {
-        // Entangled cards: 3 symbols in top corner
-        topLabel.innerHTML = `|${value}⟩|${value}⟩|${value}⟩`;
-        topLabel.style.fontSize = '0.65rem';
-        topLabel.style.letterSpacing = '-2px';
-      } else {
-        topLabel.innerHTML = `|${value}⟩`;
-      }
+      topLabel.innerHTML = `|${value}⟩`;
       card.appendChild(topLabel);
 
-      // Bottom left label - 2 symbols for entangled cards
+      // Bottom left label
       const bottomLabel = document.createElement('div');
       bottomLabel.className = `dirac-label card-bottom${(playerIndex === 1 || playerIndex === 3) ? ' label-flipped' : ''}`;
       bottomLabel.style.color = suitColor;
       
       if (isEntangled && entangledPartner) {
-        // Entangled cards: 2 partner symbols in bottom corner
-        bottomLabel.innerHTML = `|${entangledPartner}⟩|${entangledPartner}⟩`;
-        bottomLabel.style.fontSize = '0.65rem';
-        bottomLabel.style.letterSpacing = '-2px';
+        // For entangled: show the partner
+        bottomLabel.innerHTML = `|${entangledPartner}⟩`;
       } else {
-        // Regular cards: same value
+        // For normal cards: show the same value
         bottomLabel.innerHTML = `|${value}⟩`;
       }
       card.appendChild(bottomLabel);

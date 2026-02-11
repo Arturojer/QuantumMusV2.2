@@ -1818,8 +1818,6 @@ body::after {
   color: var(--sketch-charcoal);
   font-style: italic;
   z-index: 3;
-  white-space: nowrap;
-  max-width: none;
 }
 
 .card-top {
