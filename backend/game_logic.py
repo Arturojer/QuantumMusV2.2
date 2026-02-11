@@ -121,7 +121,7 @@ class QuantumMusGame:
         }
         
         # Initialize deck and hands
-        self.deck = QuantumDeck()
+        self.deck = QuantumDeck(game_mode=game_mode)
         self.deck.shuffle()
         self.hands = {i: [] for i in range(4)}
         self.discard_pile = []
@@ -143,7 +143,7 @@ class QuantumMusGame:
     def deal_cards(self):
         """Deal 4 cards to each active player using Qiskit-based QuantumDeck"""
         # Always reset deck to 40 cards at the start of a new hand/game
-        self.deck = QuantumDeck()
+        self.deck = QuantumDeck(game_mode=self.game_mode)
         self.deck.shuffle()
         self.discard_pile = []
         cards_needed = 4 * self.num_players
@@ -412,7 +412,7 @@ class QuantumMusGame:
         self.reset_entanglement_for_new_hand()
         
         # Create new deck and shuffle
-        self.deck = QuantumDeck(self.game_mode)
+        self.deck = QuantumDeck(game_mode=self.game_mode)
         self.deck.shuffle()
         
         # Deal new cards
@@ -727,23 +727,32 @@ class QuantumMusGame:
     
     # ============ COLLAPSE METHODS ============
     
-    def trigger_collapse_on_declaration(self, player_index, declaration, round_name):
+     def trigger_collapse_on_declaration(self, player_index, declaration, round_name):
         """
         Trigger collapse when a player makes a declaration
         Returns collapse event data suitable for Socket.IO broadcast
         """
-        event, penalty = self.collapse_manager.collapse_on_declaration(
+        event, penalty_points = self.collapse_manager.collapse_on_declaration(
             player_index, declaration, round_name
         )
         
         if not event:
             return {'success': False, 'error': 'Failed to collapse cards'}
         
+        # Format penalty for frontend compatibility
+        penalty_info = None
+        if penalty_points != 0:
+            penalty_info = {
+                'penalized': True,
+                'points_deducted': abs(penalty_points),
+                'reason': f"Predicción incorrecta en {round_name}"
+            }
+        
         # Build response with all hand updates for all players
         return {
             'success': True,
             'collapse_event': event.to_dict(),
-            'penalty': penalty,
+            'penalty': penalty_info,
             'player_index': player_index,
             'declaration': declaration,
             'round_name': round_name,

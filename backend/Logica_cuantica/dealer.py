@@ -1,12 +1,12 @@
 # src/quantum/dealer_qiskit.py
 
-import numpy as np
 from typing import List, Tuple, Dict, FrozenSet
 
 from .efecto_tunel import TunnelEffect
 from .baraja import QuantumDeck
 from .cartas import QuantumCard
 from .jugador import QuantumPlayer
+from .quantum_random import QuantumRNG
 
 
 class QuantumDealer:
@@ -14,6 +14,7 @@ class QuantumDealer:
     Gestiona la distribución de cartas y el flujo del juego.
     Versión "simple": cuando procede, siempre colapsa.
     Incluye "efecto túnel" para decidir el dealer de la siguiente ronda.
+    USES QUANTUM RANDOMNESS - NO CLASSICAL RNG
     """
 
     def __init__(self, num_players: int = 4, p_tunnel_classic: float = 0.99, tunnel_seed: int | None = None):
@@ -24,9 +25,9 @@ class QuantumDealer:
         self.round_number = 0
         self.measured_states: Dict[int, str] = {}  # card_id -> measured_state
 
-        # Probabilidad de seguir sentido clásico al cambiar de mano
+        # Use quantum RNG for tunnel effect
         self.p_tunnel_classic = p_tunnel_classic
-        self._tunnel_rng = np.random.default_rng(tunnel_seed)
+        self._tunnel_qrng = QuantumRNG()
 
         # Pares: key=frozenset({idA,idB}) -> colapsado (bool)
         self.pair_links: Dict[FrozenSet[int], bool] = {}
@@ -57,7 +58,8 @@ class QuantumDealer:
             return
 
         valores = [1, 2, 3, 4, 5, 6, 7, 10, 11, 12]
-        v = int(np.random.choice(valores))
+        # Use quantum random choice instead of numpy
+        v = int(self._tunnel_qrng.random_choice(valores))
 
         palo_code = QuantumDeck.PALO_CODE
         valor_code = QuantumDeck.VALOR_CODE

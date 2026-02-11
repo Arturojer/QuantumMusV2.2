@@ -1078,20 +1078,26 @@ function initGame() {
                                 (roundName === 'PARES' ? 'puede_pares' : 'puede_juego');
         showActionNotification(localIdx, notificationType);
         
-        // If server provided next_player (for 'puede' declarations), update active player
+        // If server provided next_player (for 'puede' or auto-declarations), update active player
         if (data.next_player !== null && data.next_player !== undefined) {
           const nextLocalIdx = serverToLocal(data.next_player);
           gameState.activePlayerIndex = nextLocalIdx;
-          startPlayerTurnTimer(nextLocalIdx);
           
           // Continue with declaration round if not all declared yet
+          // This includes checking for next auto-declarations
           if (Object.keys(gameState[key]).length < 4) {
-            proceedWithParesDeclaration();
+            console.log(`[ONLINE] Continuing PARES declarations, next player: ${nextLocalIdx + 1}`);
+            // Small delay to ensure state is updated before checking auto-declaration
+            setTimeout(() => {
+              proceedWithParesDeclaration();
+            }, 100);
+          } else {
+            // All declared, start timer for next phase
+            startPlayerTurnTimer(nextLocalIdx);
           }
         }
         
-        // If this was a 'puede' declaration, no collapse happens yet
-        // For 'tengo' or 'no tengo', wait for 'cards_collapsed' event
+        // For manual 'tengo' or 'no tengo', wait for 'cards_collapsed' event
       } catch (e) {
         console.warn('[socket:declaration_made] handler failed', e);
       }
@@ -1135,34 +1141,68 @@ function initGame() {
         }
         
         // Apply penalty if any
-        if (penalty) {
-          showPenaltyNotification(localIdx, penalty);
+        if (penalty && penalty.penalized) {
+          // Show penalty notification
+          showPenaltyNotification(localIdx, roundName, penalty.points_deducted);
           
           // Show team point award if points were deducted
-          if (penalty.penalized && penalty.points_deducted) {
+          if (penalty.points_deducted) {
             const playerTeam = gameState.teams.team1.players.includes(localIdx) ? 'team1' : 'team2';
             const opponentTeam = playerTeam === 'team1' ? 'team2' : 'team1';
+            
+            // Deduct points from penalized team's score
+            gameState.teams[playerTeam].score -= penalty.points_deducted;
+            
             // Award goes to opponent team
             showTeamPointAward(opponentTeam, penalty.points_deducted, 'penalty');
+            
+            // Update scoreboard
+            updateScoreboard();
           }
           
           // Update declaration with penalty marker
           const key = roundName === 'PARES' ? 'paresDeclarations' : 'juegoDeclarations';
-          if (penalty.penalized) {
-            // Mark as penalized but still eligible for betting
-            // If declared tengo (true) but was wrong, mark as 'tengo_after_penalty'
-            // If declared no tengo (false) but was wrong, mark as 'no_tengo'
-            if (declaration === true || declaration === 'tengo') {
-              gameState[key][localIdx] = 'tengo_after_penalty';
-            } else {
-              gameState[key][localIdx] = 'no_tengo';
-            }
+          // Mark as penalized but still eligible for betting
+          // If declared tengo (true) but was wrong, mark as 'tengo_after_penalty'
+          // If declared no tengo (false) but was wrong, mark as 'no_tengo'
+          if (declaration === true || declaration === 'tengo') {
+            gameState[key][localIdx] = 'tengo_after_penalty';
+          } else {
+            gameState[key][localIdx] = 'no_tengo';
           }
         }
         
         // Clear waiting flag and advance to next player
         if (window._waitingServerDeclaration && window._waitingServerDeclaration.playerIndex === localIdx) {
           window._waitingServerDeclaration = null;
+        }
+        
+        // Update active player from server if provided
+        if (data.next_player !== null && data.next_player !== undefined) {
+          const nextLocalIdx = serverToLocal(data.next_player);
+          gameState.activePlayerIndex = nextLocalIdx;
+          console.log(`[ONLINE] Next player after collapse: ${nextLocalIdx + 1}`);
+          
+          // Continue with declaration round if in PARES or JUEGO and not all declared yet
+          if (roundName === 'PARES') {
+            const key = 'paresDeclarations';
+            if (Object.keys(gameState[key]).length < 4) {
+              // Call proceedWithParesDeclaration to check for auto-declarations
+              setTimeout(() => {
+                proceedWithParesDeclaration();
+              }, 500);
+            }
+          } else if (roundName === 'JUEGO') {
+            const key = 'juegoDeclarations';
+            if (Object.keys(gameState[key]).length < 4) {
+              // TODO: Add proceedWithJuegoDeclaration if needed
+              startPlayerTurnTimer(gameState.activePlayerIndex);
+            }
+          } else {
+            startPlayerTurnTimer(gameState.activePlayerIndex);
+          }
+        } else {
+          // Fallback: advance turn locally
           nextPlayer();
           startPlayerTurnTimer(gameState.activePlayerIndex);
         }
@@ -3065,25 +3105,28 @@ function initGame() {
   }
   
   // Make a declaration in online mode (sends to server)
-  function makeDeclaration(playerIndex, declaration, roundName) {
+  function makeDeclaration(playerIndex, declaration, roundName, isAutoDeclaration = false) {
     if (!window.onlineMode || !window.QuantumMusSocket || !window.QuantumMusOnlineRoom) {
       console.warn('[makeDeclaration] Not in online mode, ignoring');
       return;
     }
     
     const serverIdx = localToServer(playerIndex);
-    console.log(`[makeDeclaration] Player ${playerIndex + 1} (server ${serverIdx}) declaring '${declaration}' in ${roundName}`);
+    console.log(`[makeDeclaration] Player ${playerIndex + 1} (server ${serverIdx}) declaring '${declaration}' in ${roundName} (auto: ${isAutoDeclaration})`);
     
     // First, send the declaration to store it
     window.QuantumMusSocket.emit('player_declaration', {
       room_id: window.QuantumMusOnlineRoom,
       player_index: serverIdx,
       declaration: declaration === 'tengo' ? true : declaration === 'no_tengo' ? false : 'puede',
-      round_name: roundName
+      round_name: roundName,
+      is_auto_declared: isAutoDeclaration
     });
     
-    // If tengo or no_tengo, trigger collapse (wait for server response to advance turn)
-    if (declaration === 'tengo' || declaration === 'no_tengo') {
+    // ONLY trigger collapse for MANUAL tengo/no_tengo declarations
+    // Auto-declarations NEVER trigger collapse (cards already collapsed)
+    if ((declaration === 'tengo' || declaration === 'no_tengo') && !isAutoDeclaration) {
+      console.log(`[makeDeclaration] Manual declaration, triggering collapse`);
       window.QuantumMusSocket.emit('trigger_declaration_collapse', {
         room_id: window.QuantumMusOnlineRoom,
         player_index: serverIdx,
@@ -3124,7 +3167,7 @@ function initGame() {
       if (isOnlineGame && typeof makeDeclaration === 'function') {
         const declStr = declaration === true ? 'tengo' : declaration === false ? 'no_tengo' : 'puede';
         try { 
-          makeDeclaration(playerIndex, declStr, 'PARES');
+          makeDeclaration(playerIndex, declStr, 'PARES', false); // false = manual declaration
           // For tengo/no_tengo, wait for server collapse response before advancing
           // For puede, server will send next_player in declaration_made event
           if (declaration !== 'puede') {
@@ -3142,20 +3185,25 @@ function initGame() {
         startPlayerTurnTimer(gameState.activePlayerIndex);
       }
     } else {
-      // Auto-declared - for online mode, still need to send to server
+      // Auto-declared - cards are already collapsed, NO collapse needed
+      console.log(`[AUTO-DECLARATION] Player ${playerIndex + 1} auto-declared, no collapse needed (cards already collapsed)`);
+      
       if (isOnlineGame && typeof makeDeclaration === 'function') {
         const declStr = declaration === true ? 'tengo' : declaration === false ? 'no_tengo' : 'puede';
         try { 
-          makeDeclaration(playerIndex, declStr, 'PARES');
-          // Server will handle turn advancement via socket events
+          makeDeclaration(playerIndex, declStr, 'PARES', true); // true = auto-declaration, NO collapse
+          
+          // For auto-declarations, DON'T trigger collapse (cards already collapsed)
+          // Just advance turn - server will handle it via declaration_made event
+          console.log(`[AUTO-DECLARATION] Sent to server, waiting for turn advancement`);
         } catch (e) { 
           console.error('[handleParesDeclaration] Error calling makeDeclaration:', e);
         }
       } else {
-        // Local mode
-        if (declaration === true || declaration === false) {
-          collapseOnDeclaration(playerIndex, 'PARES', declaration);
-        }
+        // Local mode - NO collapse for auto-declarations
+        // Cards are already collapsed, just advance turn
+        console.log(`[AUTO-DECLARATION] Local mode, advancing turn without collapse`);
+        // Turn advancement handled by proceedWithParesDeclaration
       }
     }
     
@@ -3182,22 +3230,41 @@ function initGame() {
     // Count declarations per team
     // Treat 'tengo_after_penalty' as a TENGO for counting/eligibility purposes
     const isTengo = (val) => val === true || val === 'tengo_after_penalty';
-    const team1TengoCount = gameState.teams.team1.players.filter(p => isTengo(gameState.paresDeclarations[p])).length;
-    const team2TengoCount = gameState.teams.team2.players.filter(p => isTengo(gameState.paresDeclarations[p])).length;
-
-    const team1PuedeOrTengoCount = gameState.teams.team1.players.filter(p => 
-      isTengo(gameState.paresDeclarations[p]) || gameState.paresDeclarations[p] === 'puede'
-    ).length;
-    const team2PuedeOrTengoCount = gameState.teams.team2.players.filter(p => 
-      isTengo(gameState.paresDeclarations[p]) || gameState.paresDeclarations[p] === 'puede'
-    ).length;
+    const isPuede = (val) => val === 'puede';
+    const isNoTengo = (val) => val === false;
     
-    console.log(`PARES declarations - Team1 tengo: ${team1TengoCount}, puede/tengo: ${team1PuedeOrTengoCount}`);
-    console.log(`PARES declarations - Team2 tengo: ${team2TengoCount}, puede/tengo: ${team2PuedeOrTengoCount}`);
+    const team1Players = gameState.teams.team1.players;
+    const team2Players = gameState.teams.team2.players;
     
-    // Determine if betting should happen
-    const canBet = (team1TengoCount > 0 && team2PuedeOrTengoCount > 0) || 
-                   (team2TengoCount > 0 && team1PuedeOrTengoCount > 0);
+    // Count each type of declaration per team
+    const team1Tengo = team1Players.filter(p => isTengo(gameState.paresDeclarations[p])).length;
+    const team1Puede = team1Players.filter(p => isPuede(gameState.paresDeclarations[p])).length;
+    const team1NoTengo = team1Players.filter(p => isNoTengo(gameState.paresDeclarations[p])).length;
+    
+    const team2Tengo = team2Players.filter(p => isTengo(gameState.paresDeclarations[p])).length;
+    const team2Puede = team2Players.filter(p => isPuede(gameState.paresDeclarations[p])).length;
+    const team2NoTengo = team2Players.filter(p => isNoTengo(gameState.paresDeclarations[p])).length;
+    
+    console.log(`PARES declarations - Team1: ${team1Tengo} tengo, ${team1Puede} puede, ${team1NoTengo} no tengo`);
+    console.log(`PARES declarations - Team2: ${team2Tengo} tengo, ${team2Puede} puede, ${team2NoTengo} no tengo`);
+    
+    // Determine if betting should happen based on requirements:
+    // Betting is ONLY skipped if: 
+    // - 1-2 players from SAME team say "tengo"/"puede" 
+    // - AND both players from OTHER team say "no tengo"
+    const team1HasInterest = (team1Tengo + team1Puede >= 1);
+    const team2HasInterest = (team2Tengo + team2Puede >= 1);
+    const team1AllNoTengo = (team1NoTengo === 2);
+    const team2AllNoTengo = (team2NoTengo === 2);
+    
+    // Betting is skipped only if one team has interest and other team all said no
+    const shouldSkipBetting = (team1HasInterest && team2AllNoTengo) || 
+                              (team2HasInterest && team1AllNoTengo);
+    
+    // Betting happens if we shouldn't skip it
+    const canBet = !shouldSkipBetting;
+    
+    console.log(`PARES betting decision: team1HasInterest=${team1HasInterest}, team2HasInterest=${team2HasInterest}, team1AllNoTengo=${team1AllNoTengo}, team2AllNoTengo=${team2AllNoTengo}, shouldSkipBetting=${shouldSkipBetting}, canBet=${canBet}`);
 
     // Three possible outcomes after declaration:
     // 1) Betting possible -> start PARES betting
@@ -4670,7 +4737,24 @@ function initGame() {
       // Reset game initialization flag
       gameInitialized = false;
       
-      // Return to lobby
+      // Check if in online mode
+      const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
+      
+      if (isOnlineGame) {
+        // Online mode: notify server and return all players to lobby
+        const socket = window.QuantumMusSocket;
+        const roomId = window.QuantumMusOnlineRoom;
+        
+        console.log('[GAME OVER] Returning to lobby in online mode, room:', roomId);
+        
+        // Send return to lobby event to server
+        socket.emit('return_to_lobby', { room_id: roomId });
+        
+        // The server will emit 'returned_to_lobby' to all players
+        // Navigation.js should handle that event
+      }
+      
+      // Return to lobby (works for both online and local mode)
       if (window.showScreen) {
         window.showScreen('lobby');
       } else {
@@ -6581,7 +6665,7 @@ function initGame() {
         if (gameState.currentBet.betType === 'ordago') {
           console.log('[ORDAGO RESPONSE] Only PASO and ACCEPT buttons available - hiding ENVIDO button');
           if (button1Label) button1Label.textContent = 'ORDAGO';
-          if (button2Label) button2Label.textContent = 'COUNTER';
+          // Don't set COUNTER label when responding to ordago - button will be hidden anyway
           buttons[0].style.display = 'none'; // Hide button 0 (MUS/TENGO) - not applicable during ordago response
           buttons[1].style.display = 'none'; // Hide ENVIDO/COUNTER (can't counter ORDAGO)
           buttons[4].style.display = 'none'; // Hide ÓRDAGO button (already in ORDAGO)

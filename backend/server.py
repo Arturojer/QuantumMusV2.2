@@ -15,7 +15,7 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 import logging
 import os
 from datetime import datetime
-import random
+import random  # Only used for non-game room codes
 import time
 import threading
 
@@ -32,6 +32,7 @@ from game_manager import GameManager
 from room_manager import RoomManager
 from models import db, Game, Player, GameHistory
 from Logica_cuantica.baraja import QuantumDeck
+from Logica_cuantica.quantum_random import QuantumRNG
 from config import get_config
 
 # Configure
@@ -516,6 +517,36 @@ def handle_leave_room(data):
         logger.error(f"Error leaving room {room_id}: {e}", exc_info=True)
         emit('game_error', {'error': 'Failed to leave room'})
 
+@socketio.on('return_to_lobby')
+def handle_return_to_lobby(data):
+    """Return to lobby after game ends - cleanup game but keep room"""
+    room_id = data.get('room_id')
+    
+    try:
+        logger.info(f"Player {request.sid} returning to lobby for room {room_id}")
+        
+        # Remove the game instance but keep the room
+        game = game_manager.get_game(room_id)
+        if game:
+            game_manager.remove_game(room_id)
+            logger.info(f"Removed game for room {room_id}")
+        
+        # Get room info
+        room = room_manager.get_room(room_id)
+        if room:
+            # Emit to all players in room that game ended and they're back in lobby
+            socketio.emit('returned_to_lobby', {
+                'success': True,
+                'room': room,
+                'message': 'Game ended. Ready to start a new game!'
+            }, room=room_id)
+            logger.info(f"All players in room {room_id} returned to lobby")
+        else:
+            emit('game_error', {'error': 'Room not found'})
+    except Exception as e:
+        logger.error(f"Error returning to lobby for room {room_id}: {e}", exc_info=True)
+        emit('game_error', {'error': 'Failed to return to lobby'})
+
 @socketio.on('start_game')
 def handle_start_game(data):
     """Start the game in a room"""
@@ -540,8 +571,9 @@ def handle_start_game(data):
     
     # Create game instance
     game = game_manager.create_game(room_id, room['players'], room['game_mode'])
-    # Server-authoritative mano for all clients
-    game.state['manoIndex'] = random.randrange(game.num_players)
+    # Server-authoritative mano for all clients - use quantum randomness
+    qrng = QuantumRNG()
+    game.state['manoIndex'] = qrng.random_int(0, game.num_players - 1)
     game.state['activePlayerIndex'] = game.state['manoIndex']
     
     # Deal initial cards
@@ -804,17 +836,20 @@ def handle_player_declaration(data):
         emit('game_error', {'error': 'Not your turn'})
         return
     
+    # Check if this is an auto-declaration (indicated by client)
+    is_auto_declared = data.get('is_auto_declared', False)
+    
     # Store declaration in game state
     key = 'paresDeclarations' if round_name == 'PARES' else 'juegoDeclarations'
     if key not in game.state:
         game.state[key] = {}
     game.state[key][player_index] = declaration
     
-    logger.info(f"Player {player_index} declared '{declaration}' in {round_name} for room {room_id}")
+    logger.info(f"Player {player_index} declared '{declaration}' in {round_name} for room {room_id} (auto: {is_auto_declared})")
     
-    # For 'puede' declarations or auto-declarations, advance to next player
-    # (tengo/no tengo will wait for collapse event to advance)
-    advance_turn = (declaration == 'puede')
+    # Advance turn for 'puede' declarations OR auto-declarations
+    # (manual tengo/no tengo will wait for collapse event to advance)
+    advance_turn = (declaration == 'puede') or is_auto_declared
     if advance_turn:
         game.next_player()
     
@@ -826,6 +861,7 @@ def handle_player_declaration(data):
         'round_name': round_name,
         'declarations': game.state[key],
         'next_player': game.state['activePlayerIndex'] if advance_turn else None,
+        'is_auto_declared': is_auto_declared,
         'timestamp': datetime.utcnow().isoformat()
     }, room=room_id)
 
@@ -852,6 +888,10 @@ def handle_trigger_declaration_collapse(data):
     collapse_result = game.trigger_collapse_on_declaration(player_index, declaration, round_name)
     
     if collapse_result['success']:
+        # Advance turn after successful collapse
+        game.next_player()
+        next_player_index = game.state['activePlayerIndex']
+        
         # Broadcast collapse event to ALL players in the room
         socketio.emit('cards_collapsed', {
             'success': True,
@@ -861,24 +901,11 @@ def handle_trigger_declaration_collapse(data):
             'declaration': declaration,
             'round_name': round_name,
             'updated_hands': collapse_result['updated_hands'],
+            'next_player': next_player_index,
             'timestamp': datetime.utcnow().isoformat()
         }, room=room_id)
         
-        logger.info(f"Collapse broadcast in room {room_id}: Player {player_index} made declaration '{declaration}' in {round_name}")
-    
-    if collapse_result['success']:
-        # Broadcast collapse event to ALL players
-        socketio.emit('cards_collapsed', {
-            'success': True,
-            'collapse_event': collapse_result['collapse_event'],
-            'player_index': player_index,
-            'round_name': round_name,
-            'collapse_reason': 'bet_acceptance',
-            'updated_hands': collapse_result['updated_hands'],
-            'timestamp': datetime.utcnow().isoformat()
-        }, room=room_id)
-        
-        logger.info(f"Collapse broadcast in room {room_id}: Player {player_index} accepted bet in {round_name}")
+        logger.info(f"Collapse broadcast in room {room_id}: Player {player_index} made declaration '{declaration}' in {round_name}, next player: {next_player_index}")
     else:
         socketio.emit('game_error', {'error': collapse_result.get('error', 'Failed to collapse cards')}, room=room_id)
 

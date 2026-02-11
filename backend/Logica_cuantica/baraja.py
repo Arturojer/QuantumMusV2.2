@@ -1,7 +1,9 @@
 import numpy as np
 from typing import List, Tuple, Dict
+from qiskit import QuantumCircuit
 from qiskit_aer import AerSimulator
 from .cartas import QuantumCard
+from .quantum_random import QuantumRNG
 
 class QuantumDeck:
     """
@@ -27,10 +29,26 @@ class QuantumDeck:
         11: '1001', 12: '1010'
     }
 
-    def __init__(self, enable_king_pit_entanglement: bool = True, enable_two_three_entanglement: bool = True):
+    def __init__(self, enable_king_pit_entanglement: bool = True, enable_two_three_entanglement: bool = None, game_mode='4'):
+        """
+        Initialize QuantumDeck with entanglement options
+        
+        Args:
+            enable_king_pit_entanglement: Enable Rey-Pito entanglement
+            enable_two_three_entanglement: Enable Tres-Dos entanglement (auto-set based on game_mode if None)
+            game_mode: '4' for 4 reyes (only K/Pito entangled), '8' for 8 reyes (K/Pito and 3/2 entangled)
+        """
+        # Auto-configure entanglement based on game mode if not explicitly set
+        if enable_two_three_entanglement is None:
+            enable_two_three_entanglement = (game_mode == '8')
+        
+        self.game_mode = game_mode
         self.cards = self._create_deck()
         self.deck_index = 0
         self.simulator = AerSimulator()
+        
+        # Use quantum RNG for all random operations
+        self.qrng = QuantumRNG()
 
         self.enable_king_pit_entanglement = enable_king_pit_entanglement
         self.enable_two_three_entanglement = enable_two_three_entanglement
@@ -53,9 +71,29 @@ class QuantumDeck:
         return cards
 
     def shuffle(self, seed: int = None):
+        """
+        Shuffle deck using quantum randomness.
+        
+        Args:
+            seed: DEPRECATED - Only for testing/reproducibility. Do not use in production.
+                  Production code should use quantum shuffle (seed=None).
+        
+        Raises:
+            Warning if seed is provided (classical shuffle used for testing only)
+        """
         if seed is not None:
+            # For testing/reproducibility only - emit warning
+            import warnings
+            warnings.warn(
+                "Classical shuffle with seed is only for testing. "
+                "Production code should use quantum shuffle (seed=None).",
+                UserWarning
+            )
             np.random.seed(seed)
-        np.random.shuffle(self.cards)
+            np.random.shuffle(self.cards)
+        else:
+            # Use quantum shuffle for production
+            self.cards = self.qrng.shuffle(self.cards)
         self.deck_index = 0
 
     def draw(self, num_cards: int = 1) -> List[QuantumCard]:
@@ -67,7 +105,13 @@ class QuantumDeck:
         return drawn
 
     def reset(self):
+        """Reset deck index"""
         self.deck_index = 0
+    
+    def reset_entanglement_states(self):
+        """Reset entanglement collapse caches for new hand - cards return to entangled state"""
+        self.king_pit_collapsed = {}
+        self.tres_dos_collapsed = {}
 
     def get_deck_info(self) -> dict:
         return {
@@ -101,7 +145,8 @@ class QuantumDeck:
         pito = self.PALO_CODE[palo] + self.VALOR_CODE[10]
 
         # Colapso: o se quedan como (Rey,Pito) o se "intercambian identidades"
-        if np.random.rand() < 0.5:
+        # Use quantum randomness instead of numpy
+        if self.qrng.random_float() < 0.5:
             pair = (rey, pito)
         else:
             pair = (pito, rey)
@@ -132,7 +177,8 @@ class QuantumDeck:
         tres = self.PALO_CODE[palo] + self.VALOR_CODE[3]
         dos = self.PALO_CODE[palo] + self.VALOR_CODE[2]
 
-        if np.random.rand() < 0.5:
+        # Use quantum randomness instead of numpy
+        if self.qrng.random_float() < 0.5:
             pair = (tres, dos)
         else:
             pair = (dos, tres)

@@ -80,6 +80,11 @@ class GenericBettingHandler:
         elif phase['phaseState'] in ['BET_PLACED', 'WAITING_RESPONSE']:
             return self._handle_response_to_bet(player_index, player_team, action, extra_data)
 
+        elif phase['phaseState'] == 'RESOLVED':
+            # Phase already resolved, ignore action
+            logger.info(f"[{self.round_type}] Phase already resolved, ignoring action from player {player_index}")
+            return {'success': False, 'error': 'Round already resolved', 'already_resolved': True}
+
         else:
             logger.error(f"[{self.round_type}] Invalid phase state: {phase['phaseState']}")
             return {'success': False, 'error': 'Invalid phase state'}
