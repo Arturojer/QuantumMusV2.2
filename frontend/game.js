@@ -5241,11 +5241,9 @@ function initGame() {
         const oldOverlay = card.querySelector('.discard-overlay');
         if (oldOverlay) oldOverlay.remove();
         
-        // Reset selection state (only if not already set)
+        // FORCE reset selection state to false for ALL cards at start of discard phase
         card.classList.add('selectable');
-        if (typeof card.dataset.selected === 'undefined') {
-          card.dataset.selected = 'false';
-        }
+        card.dataset.selected = 'false';
         
         // Remove the default click handler that shows card details
         card.onclick = null;
@@ -5702,6 +5700,8 @@ function initGame() {
     card.dataset.cardIndex = String(index);
     // Store player index so selection and logging can reference owner reliably
     card.dataset.playerIndex = String(playerIndex);
+    // Initialize selection state for discard phase
+    card.dataset.selected = 'false';
     
     const rotation = (Math.random() - 0.5) * 6;
     // Rotar cartas de jugadores laterales (2 y 4 = índices 1 y 3)
