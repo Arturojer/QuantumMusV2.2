@@ -174,10 +174,12 @@ def _check_and_emit_auto_declaration(room_id, game, round_name):
     
     declarations = game.state[key]
     
-    # If all players have declared, check if we need to transition to PUNTO or start betting
+    # If all players have declared, check if we need to transition or start betting
     if len(declarations) >= 4:
         if current_round == 'JUEGO':
             _handle_juego_declarations_complete(room_id, game)
+        elif current_round == 'PARES':
+            _handle_pares_declarations_complete(room_id, game)
         return False
     
     # Keep checking players until finding one that needs manual declaration
@@ -316,6 +318,69 @@ def _handle_juego_declarations_complete(room_id, game):
         game.state['activePlayerIndex'] = game.state['manoIndex']
         socketio.emit('betting_phase_started', {
             'round': 'JUEGO',
+            'active_player': game.state['manoIndex'],
+            'game_state': game.get_public_state()
+        }, room=room_id)
+
+
+def _handle_pares_declarations_complete(room_id, game):
+    """
+    Handle completion of all PARES declarations.
+    Determine if we should start PARES betting or move to next round.
+    """
+    declarations = game.state.get('paresDeclarations', {})
+    if len(declarations) < 4:
+        return  # Not all declarations complete yet
+    
+    # Count declarations per team
+    team1_players = game.state['teams']['team1']['players']
+    team2_players = game.state['teams']['team2']['players']
+    
+    team1_tengo = sum(1 for p in team1_players if declarations.get(p) in [True, 'tengo_after_penalty'])
+    team1_no_tengo = sum(1 for p in team1_players if declarations.get(p) == False)
+    
+    team2_tengo = sum(1 for p in team2_players if declarations.get(p) in [True, 'tengo_after_penalty'])
+    team2_no_tengo = sum(1 for p in team2_players if declarations.get(p) == False)
+    
+    logger.info(f"PARES declarations complete - Team1: {team1_tengo} tengo, {team1_no_tengo} no tengo | Team2: {team2_tengo} tengo, {team2_no_tengo} no tengo")
+    
+    # Check if no one has PARES (all said "no tengo") → move to JUEGO
+    no_one_has_pares = (team1_tengo == 0 and team2_tengo == 0)
+    if no_one_has_pares:
+        logger.info('No one has PARES (all NO TENGO) - moving to JUEGO round')
+        game.move_to_next_round()
+        socketio.emit('round_transition', {
+            'round': 'JUEGO',
+            'reason': 'no_pares',
+            'active_player': game.state['manoIndex'],
+            'game_state': game.get_public_state()
+        }, room=room_id)
+        return
+    
+    # Check betting conditions
+    team1_has_pares = (team1_tengo >= 1)
+    team2_has_pares = (team2_tengo >= 1)
+    
+    should_skip_betting = (team1_has_pares and team2_no_tengo == 2) or (team2_has_pares and team1_no_tengo == 2)
+    
+    if should_skip_betting:
+        # Only one team has PARES - no betting, move to JUEGO
+        logger.info('Only one team has PARES - moving to JUEGO round')
+        game.move_to_next_round()
+        socketio.emit('round_transition', {
+            'round': 'JUEGO',
+            'reason': 'one_team_pares',
+            'active_player': game.state['manoIndex'],
+            'game_state': game.get_public_state()
+        }, room=room_id)
+    else:
+        # Both teams have PARES - start PARES betting
+        logger.info('Both teams have PARES - starting PARES betting')
+        game.state['paresPhase'] = 'betting'
+        game.state['activePlayerIndex'] = game.state['manoIndex']
+        game.round_handler.pares_handler.initialize_round()
+        socketio.emit('betting_phase_started', {
+            'round': 'PARES',
             'active_player': game.state['manoIndex'],
             'game_state': game.get_public_state()
         }, room=room_id)
