@@ -843,6 +843,10 @@ function initGame() {
           card.classList.add('card-dealt');
           card.style.opacity = '1'; // Asegurar opacidad
         }
+      // Apply entanglement glows based on server data
+      if (data.game_state && data.game_state.entanglement_glows) {
+        applyEntanglementGlows(data.game_state);
+      }
       });
     });
     socket.on('game_update', (data) => {
@@ -8431,3 +8435,84 @@ function initGame() {
 }
 // Listen for game screen entry (from lobby "Iniciar partida")
 window.addEventListener('enterGameScreen', initGame);
+// ===================== ENTANGLEMENT GLOW SYSTEM (Server-based) =====================
+
+/**
+ * Apply entanglement glow based on server data
+ * Uses entanglement_glows from player game state
+ */
+function applyEntanglementGlows(playerState) {
+  if (!playerState || !playerState.entanglement_glows) {
+    console.log('[GLOW] No entanglement glow data from server');
+    return;
+  }
+  
+  const glowData = playerState.entanglement_glows;
+  
+  console.log('[GLOW] Applying entanglement glows:', glowData);
+  
+  // 1. Apply glow to local player's cards
+  if (glowData.has_entangled_pair && glowData.my_cards && glowData.my_cards.length > 0) {
+    const player1Cards = document.querySelectorAll('#player1-zone .quantum-card');
+    
+    glowData.my_cards.forEach(cardIndex => {
+      if (player1Cards[cardIndex]) {
+        const card = player1Cards[cardIndex];
+        // Add entangled-card class for glow effect
+        card.classList.add('entangled-card', 'teammate-entangled');
+        // Set color based on suit
+        const suitColor = card.dataset.suitColor || '#2ec4b6';
+        card.style.setProperty('--entangle-color', suitColor);
+        console.log(`[GLOW] ✨ Applied glow to local card ${cardIndex}`);
+      }
+    });
+  }
+  
+  // 2. Apply glow to teammate's cards (if they have the partner)
+  if (glowData.has_entangled_pair && glowData.teammate_index !== null && glowData.pairs) {
+    // Map server player index to UI position
+    // Server: 0 (local), 2 (teammate top)
+    // UI: player1-zone (bottom), player3-zone (top)
+    const teammateServerIndex = glowData.teammate_index;
+    let teammateUIZone = 'player3-zone'; // Default for player 2
+    
+    // Map server index to UI zone
+    if (teammateServerIndex === 2) {
+      teammateUIZone = 'player3-zone'; // Top
+    } else if (teammateServerIndex === 0) {
+      teammateUIZone = 'player1-zone'; // Bottom (shouldn't happen for teammate)
+    }
+    
+    const teammateZone = document.querySelector(`#${teammateUIZone}`);
+    
+    if (teammateZone) {
+      const teammateCards = teammateZone.querySelectorAll('.quantum-card');
+      
+      // For each pair, mark a card in teammate's hand
+      // Since we don't know which specific card, we mark based on position
+      glowData.pairs.forEach((pair, pairIdx) => {
+        // Mark the first N cards where N is number of pairs
+        if (teammateCards[pairIdx]) {
+          const card = teammateCards[pairIdx];
+          card.classList.add('entangled-card', 'teammate-entangled');
+          const suitColor = card.dataset.suitColor || '#a78bfa'; // Different color for teammate
+          card.style.setProperty('--entangle-color', suitColor);
+        }
+      });
+      
+      console.log(`[GLOW] ✨ Applied glow to ${glowData.pairs.length} teammate cards (Server Player ${teammateServerIndex})`);
+    }
+  }
+}
+
+/**
+ * Remove all entanglement glows
+ */
+function clearEntanglementGlows() {
+  document.querySelectorAll('.quantum-card').forEach(card => {
+    card.classList.remove('entangled-card', 'teammate-entangled');
+    card.classList.remove('entangled-candidate');
+  });
+  console.log('[GLOW] Cleared all entanglement glows');
+}
+
