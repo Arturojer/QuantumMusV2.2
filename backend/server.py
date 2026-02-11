@@ -909,6 +909,37 @@ def handle_trigger_declaration_collapse(data):
     else:
         socketio.emit('game_error', {'error': collapse_result.get('error', 'Failed to collapse cards')}, room=room_id)
 
+@socketio.on('trigger_bet_collapse')
+def handle_trigger_bet_collapse(data):
+    """Handle card collapse when player places/accepts a bet"""
+    room_id = data.get('room_id')
+    player_index = data.get('player_index')
+    round_name = data.get('round_name')  # 'PARES', 'JUEGO', or 'PUNTO'
+    
+    game = game_manager.get_game(room_id)
+    if not game:
+        emit('game_error', {'error': 'Game not found'})
+        logger.error(f"Game not found for room {room_id} in bet collapse event")
+        return
+    
+    # Trigger collapse
+    collapse_result = game.trigger_collapse_on_bet_acceptance(player_index, round_name)
+    
+    if collapse_result['success']:
+        # Broadcast collapse event to ALL players in the room
+        socketio.emit('bet_collapse_completed', {
+            'success': True,
+            'collapse_event': collapse_result['collapse_event'],
+            'player_index': player_index,
+            'round_name': round_name,
+            'updated_hands': collapse_result['updated_hands'],
+            'timestamp': datetime.utcnow().isoformat()
+        }, room=room_id)
+        
+        logger.info(f"Bet collapse broadcast in room {room_id}: Player {player_index} in {round_name}")
+    else:
+        socketio.emit('game_error', {'error': collapse_result.get('error', 'Failed to collapse cards')}, room=room_id)
+
 @socketio.on('trigger_final_collapse')
 def handle_trigger_final_collapse(data):
     """Handle final collapse of all remaining entangled cards at hand end"""

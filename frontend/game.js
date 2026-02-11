@@ -1102,6 +1102,52 @@ function initGame() {
         console.warn('[socket:declaration_made] handler failed', e);
       }
     });
+    
+    socket.on('bet_collapse_completed', (data) => {
+      try {
+        const localIdx = serverToLocal(data.player_index);
+        const roundName = data.round_name;
+        
+        console.log(`[ONLINE] Bet collapse completed for player ${localIdx + 1} in ${roundName}`);
+        
+        // Update hands from server
+        if (data.updated_hands) {
+          Object.keys(data.updated_hands).forEach(serverIdx => {
+            const localPlayerIdx = serverToLocal(parseInt(serverIdx));
+            const hand = data.updated_hands[serverIdx];
+            
+            // Update cards in UI
+            const playerZone = document.getElementById(`player${localPlayerIdx + 1}-zone`);
+            if (playerZone) {
+              const cardsRow = playerZone.querySelector('.cards-row');
+              const cards = cardsRow.querySelectorAll('.quantum-card');
+              
+              hand.forEach((cardData, cardIdx) => {
+                if (cards[cardIdx]) {
+                  // Update card value display
+                  const cardTop = cards[cardIdx].querySelector('.card-top');
+                  const decoration = cards[cardIdx].querySelector('.quantum-decoration');
+                  if (cardTop && decoration) {
+                    const mappedCard = mapBackendCardToFrontend(cardData);
+                    decoration.textContent = mappedCard.value;
+                    // Mark as collapsed
+                    cards[cardIdx].dataset.collapsed = 'true';
+                    cards[cardIdx].dataset.value = mappedCard.value;
+                    cards[cardIdx].dataset.entangled = 'false';
+                  }
+                }
+              });
+            }
+          });
+        }
+        
+        // Update scoreboard
+        updateScoreboard();
+      } catch (e) {
+        console.warn('[socket:bet_collapse_completed] handler failed', e);
+      }
+    });
+    
     socket.on('cards_collapsed', (data) => {
       try {
         const localIdx = serverToLocal(data.player_index);
@@ -7490,6 +7536,29 @@ function initGame() {
    */
   function collapseOnBetAcceptance(playerIndex, roundName) {
     console.log(`[COLLAPSE ON BET] Player ${playerIndex + 1} collapsing for ${roundName}`);
+    
+    // Check if in online mode
+    const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
+    
+    if (isOnlineGame) {
+      // Online mode: send collapse request to server
+      const socket = window.QuantumMusSocket;
+      const roomId = window.QuantumMusOnlineRoom;
+      const serverIdx = localToServer(playerIndex);
+      
+      console.log(`[ONLINE BET COLLAPSE] Sending collapse request for player ${playerIndex + 1} (server ${serverIdx}) in ${roundName}`);
+      
+      socket.emit('trigger_bet_collapse', {
+        room_id: roomId,
+        player_index: serverIdx,
+        round_name: roundName
+      });
+      
+      // Server will broadcast bet_collapse_completed event
+      return;
+    }
+    
+    // Local mode: handle collapse directly
     const playerId = `player${playerIndex + 1}`;
     const cardElements = document.querySelectorAll(`#${playerId}-zone .quantum-card`);
     const cardsToCollapse = [];
