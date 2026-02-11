@@ -855,13 +855,27 @@ class QuantumMusGame:
         return None
     
     def _has_pares(self, hand):
-        """Check if a hand has pares (all cards must be collapsed)"""
+        """Check if a hand has pares (all cards must be collapsed)
+        
+        In mode 8, applies value equivalence:
+        - A and 2 are equivalent (form pairs together)
+        - 3 and K are equivalent (form pairs together)
+        """
+        def normalizeValueForPares(val):
+            """Normalize card values for pair checking in mode 8"""
+            if self.game_mode == '8':
+                if val == 'A': return '2'  # A and 2 form pairs
+                if val == '3': return 'K'  # 3 and K form pairs
+            return val
+        
         value_counts = {}
         for card in hand:
             value = getattr(card, 'value', None)
             if value is None:
                 continue
-            value_counts[value] = value_counts.get(value, 0) + 1
+            # Normalize value for mode 8
+            normalized_value = normalizeValueForPares(value)
+            value_counts[normalized_value] = value_counts.get(normalized_value, 0) + 1
         
         return any(count >= 2 for count in value_counts.values())
     
@@ -888,38 +902,67 @@ class QuantumMusGame:
         """
         Check if PARES outcome is certain despite having entangled cards
         Returns True (always has pares), False (never has pares), or None (uncertain)
+        
+        Entanglement: K↔A and 2↔3 (mode 8) can swap values within same suit
+        
+        Value equivalence for PARES in mode 8:
+        - A and 2 are equivalent (form pairs together)
+        - 3 and K are equivalent (form pairs together)
         """
+        def normalizeValueForPares(val):
+            """Normalize card values for pair checking in mode 8"""
+            if self.game_mode == '8':
+                if val == 'A': return '2'  # A and 2 form pairs
+                if val == '3': return 'K'  # 3 and K form pairs
+            return val
+        
         # Get entangled cards and their possible values
         entangled_cards = []
         collapsed_cards = []
         
         for card in hand:
-            if getattr(card, 'is_collapsed', False):
-                collapsed_cards.append(getattr(card, 'value', ''))
+            is_collapsed = getattr(card, 'is_collapsed', False)
+            card_value = getattr(card, 'value', '')
+            
+            if is_collapsed:
+                # Card has collapsed to a definite value
+                collapsed_cards.append(card_value)
             else:
-                # Entangled card - get both possible values
-                main_value = getattr(card, 'value', '')
-                partner_card_id = getattr(card, 'partner_card_id', None)
-                if partner_card_id and partner_card_id.partner_id:
-                    # Get partner's value
-                    partner_value = self._get_card_value_by_id(partner_card_id.partner_id)
-                    entangled_cards.append([main_value, partner_value])
+                # Card is in superposition - determine possible values
+                # K↔A entanglement (always active)
+                if card_value == 'K':
+                    entangled_cards.append(['K', 'A'])
+                elif card_value == 'A':
+                    entangled_cards.append(['A', 'K'])
+                # 2↔3 entanglement (only in mode 8)
+                elif self.game_mode == '8' and card_value == '2':
+                    entangled_cards.append(['2', '3'])
+                elif self.game_mode == '8' and card_value == '3':
+                    entangled_cards.append(['3', '2'])
                 else:
-                    entangled_cards.append([main_value])
+                    # Non-entangled card but not collapsed - shouldn't happen
+                    # but if it does, require manual declaration
+                    return None
         
         if not entangled_cards:
-            # Should not happen, but treat as collapsed case
-            return self._has_pares(hand)
+            # All cards collapsed, check directly with normalization
+            normalized_values = [normalizeValueForPares(v) for v in collapsed_cards]
+            value_counts = {}
+            for v in normalized_values:
+                value_counts[v] = value_counts.get(v, 0) + 1
+            return any(count >= 2 for count in value_counts.values())
         
         # Check all possible combinations
         can_have_pares = False
         can_not_have_pares = False
         
         def check_combination(values):
-            """Check if a combination of values has pares"""
+            """Check if a combination of values has pares (with normalization)"""
             all_values = collapsed_cards + values
+            # Normalize values for mode 8
+            normalized_values = [normalizeValueForPares(v) for v in all_values]
             value_counts = {}
-            for v in all_values:
+            for v in normalized_values:
                 value_counts[v] = value_counts.get(v, 0) + 1
             return any(count >= 2 for count in value_counts.values())
         
@@ -950,12 +993,14 @@ class QuantumMusGame:
         """
         Check if JUEGO outcome is certain despite having entangled cards
         Returns True (always has juego), False (never has juego), or None (uncertain)
+        
+        Entanglement: K↔A and 2↔3 (mode 8) can swap values within same suit
         """
         def get_card_points(val):
             if val == 'A':
                 return 1
             if val == '2':
-                return 1
+                return 2 if self.game_mode == '4' else 1
             if val == '3':
                 return 3 if self.game_mode == '4' else 10
             if val in ['J', 'Q', 'K']:
@@ -970,17 +1015,28 @@ class QuantumMusGame:
         collapsed_points = 0
         
         for card in hand:
-            if getattr(card, 'is_collapsed', False):
-                collapsed_points += get_card_points(getattr(card, 'value', ''))
+            is_collapsed = getattr(card, 'is_collapsed', False)
+            card_value = getattr(card, 'value', '')
+            
+            if is_collapsed:
+                # Card has collapsed to a definite value
+                collapsed_points += get_card_points(card_value)
             else:
-                # Entangled card - get both possible values
-                main_value = getattr(card, 'value', '')
-                partner_card_id = getattr(card, 'partner_card_id', None)
-                if partner_card_id and partner_card_id.partner_id:
-                    partner_value = self._get_card_value_by_id(partner_card_id.partner_id)
-                    entangled_cards.append([main_value, partner_value])
+                # Card is in superposition - determine possible values
+                # K↔A entanglement (always active)
+                if card_value == 'K':
+                    entangled_cards.append(['K', 'A'])
+                elif card_value == 'A':
+                    entangled_cards.append(['A', 'K'])
+                # 2↔3 entanglement (only in mode 8)
+                elif self.game_mode == '8' and card_value == '2':
+                    entangled_cards.append(['2', '3'])
+                elif self.game_mode == '8' and card_value == '3':
+                    entangled_cards.append(['3', '2'])
                 else:
-                    entangled_cards.append([main_value])
+                    # Non-entangled card but not collapsed - shouldn't happen
+                    # but if it does, require manual declaration
+                    return None
         
         if not entangled_cards:
             # All collapsed

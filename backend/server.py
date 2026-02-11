@@ -249,8 +249,8 @@ def _handle_juego_declarations_complete(room_id, game):
         return  # Not all declarations complete yet
     
     # Count declarations per team
-    team1_players = game.teams['team1']['players']
-    team2_players = game.teams['team2']['players']
+    team1_players = game.state['teams']['team1']['players']
+    team2_players = game.state['teams']['team2']['players']
     
     team1_tengo = sum(1 for p in team1_players if declarations.get(p) in [True, 'tengo_after_penalty'])
     team1_puede = sum(1 for p in team1_players if declarations.get(p) == 'puede')
