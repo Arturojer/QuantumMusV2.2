@@ -517,6 +517,36 @@ def handle_leave_room(data):
         logger.error(f"Error leaving room {room_id}: {e}", exc_info=True)
         emit('game_error', {'error': 'Failed to leave room'})
 
+@socketio.on('return_to_lobby')
+def handle_return_to_lobby(data):
+    """Return to lobby after game ends - cleanup game but keep room"""
+    room_id = data.get('room_id')
+    
+    try:
+        logger.info(f"Player {request.sid} returning to lobby for room {room_id}")
+        
+        # Remove the game instance but keep the room
+        game = game_manager.get_game(room_id)
+        if game:
+            game_manager.remove_game(room_id)
+            logger.info(f"Removed game for room {room_id}")
+        
+        # Get room info
+        room = room_manager.get_room(room_id)
+        if room:
+            # Emit to all players in room that game ended and they're back in lobby
+            socketio.emit('returned_to_lobby', {
+                'success': True,
+                'room': room,
+                'message': 'Game ended. Ready to start a new game!'
+            }, room=room_id)
+            logger.info(f"All players in room {room_id} returned to lobby")
+        else:
+            emit('game_error', {'error': 'Room not found'})
+    except Exception as e:
+        logger.error(f"Error returning to lobby for room {room_id}: {e}", exc_info=True)
+        emit('game_error', {'error': 'Failed to return to lobby'})
+
 @socketio.on('start_game')
 def handle_start_game(data):
     """Start the game in a room"""

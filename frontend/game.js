@@ -4670,7 +4670,24 @@ function initGame() {
       // Reset game initialization flag
       gameInitialized = false;
       
-      // Return to lobby
+      // Check if in online mode
+      const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
+      
+      if (isOnlineGame) {
+        // Online mode: notify server and return all players to lobby
+        const socket = window.QuantumMusSocket;
+        const roomId = window.QuantumMusOnlineRoom;
+        
+        console.log('[GAME OVER] Returning to lobby in online mode, room:', roomId);
+        
+        // Send return to lobby event to server
+        socket.emit('return_to_lobby', { room_id: roomId });
+        
+        // The server will emit 'returned_to_lobby' to all players
+        // Navigation.js should handle that event
+      }
+      
+      // Return to lobby (works for both online and local mode)
       if (window.showScreen) {
         window.showScreen('lobby');
       } else {

@@ -100,6 +100,27 @@ document.addEventListener('DOMContentLoaded', () => {
         alert(data.error || 'Error en el juego');
       });
 
+      socket.on('returned_to_lobby', (data) => {
+        console.log('[RETURNED TO LOBBY] All players returned to lobby:', data);
+        
+        if (data.success && data.room) {
+          // Update room state
+          gameState.roomId = data.room.id;
+          gameState.players = mapRoomPlayersToLocal(data.room.players || [], gameState.isHost);
+          gameState.gameMode = data.room.game_mode || '8';
+          
+          // Update UI
+          updatePlayersList();
+          setupGameSettings();
+          updateStartButton();
+          
+          // Show success message
+          if (data.message) {
+            console.log('[LOBBY] ' + data.message);
+          }
+        }
+      });
+
       return socket;
     } catch (e) {
       console.warn('Socket.IO no disponible:', e);
