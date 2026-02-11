@@ -520,6 +520,8 @@ class QuantumMusGame:
         self.state['chicaPhase'] = None
         self.state['paresPhase'] = None
         self.state['juegoPhase'] = None
+        self.state['paresDeclarations'] = {}  # Reset PARES declarations
+        self.state['juegoDeclarations'] = {}  # Reset JUEGO declarations
         self.state['deferredResults'] = []
         self.state['cardsDiscarded'] = {}
         self.state['waitingForDiscard'] = False

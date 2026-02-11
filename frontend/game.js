@@ -1275,21 +1275,23 @@ function initGame() {
                 }
               });
               
-              // Trigger collapse animation for local player
-              if (isLocalPlayerDeclaration && cardsToCollapse.length > 0 && isPlayerWhoDeclared) {
-                console.log(`[ONLINE] Triggering collapse animation for ${cardsToCollapse.length} cards`);
+              // Trigger collapse animation when this player declared and has cards to collapse
+              // Animation should play for ANY player who declares, not just local player
+              if (isPlayerWhoDeclared && cardsToCollapse.length > 0) {
+                console.log(`[ONLINE] Triggering collapse animation for ${cardsToCollapse.length} cards of player ${localPlayerIdx + 1}`);
                 window.quantumCollapse.collapseMultipleCards(cardsToCollapse, () => {
                   console.log(`[ONLINE] Collapse animation complete`);
                   // Update partner cards
                   collapsePartnerCards(cardsToCollapse, localPlayerIdx);
                 });
-              } else if (isPlayerWhoDeclared && cardsToCollapse.length > 0) {
-                // No animation but still collapse partners
-                collapsePartnerCards(cardsToCollapse, localPlayerIdx);
               }
             }
           });
         }
+        
+        // Update scoreboard after collapse to recalculate probabilities
+        // This ensures probabilities reflect the new collapsed card states
+        updateScoreboard();
         
         // Apply penalty if any
         if (penalty && penalty.penalized) {
@@ -1307,7 +1309,7 @@ function initGame() {
             // Award goes to opponent team
             showTeamPointAward(opponentTeam, penalty.points_deducted, 'penalty');
             
-            // Update scoreboard
+            // Update scoreboard again after penalty adjustments
             updateScoreboard();
           }
           
@@ -6668,20 +6670,19 @@ function initGame() {
       if (gameState.activePlayerIndex === 0) {
         if (gameState.currentRound === 'MUS') {
           handleMusRound(0, 'mus');
-        } else if (gameState.currentRound === 'PARES' && !gameState.paresDeclarations.hasOwnProperty(0)) {
-          handleParesDeclaration(0, true);
-        } else if (gameState.currentRound === 'JUEGO' && !gameState.juegoDeclarations.hasOwnProperty(0)) {
-          handleJuegoDeclaration(0, true);
         }
+        // MUS button should NEVER be used for PARES/JUEGO - those use different buttons
       }
     };
 
     if (envidoBtn) envidoBtn.onclick = () => {
       if (gameState.activePlayerIndex === 0) {
         if (gameState.currentRound === 'PARES' && !gameState.paresDeclarations.hasOwnProperty(0)) {
-          handleParesDeclaration(0, false);
+          // In PARES round, envidoBtn becomes TENGO button
+          handleParesDeclaration(0, true);
         } else if (gameState.currentRound === 'JUEGO' && !gameState.juegoDeclarations.hasOwnProperty(0)) {
-          handleJuegoDeclaration(0, false);
+          // In JUEGO round, envidoBtn becomes TENGO button
+          handleJuegoDeclaration(0, true);
         } else if (gameState.currentRound === 'MUS') {
           showEnvidoModal((amount) => {
             gameState.currentBet.amount = amount;
@@ -6701,9 +6702,11 @@ function initGame() {
     if (pasoBtn) pasoBtn.onclick = () => {
       if (gameState.activePlayerIndex === 0) {
         if (gameState.currentRound === 'PARES' && !gameState.paresDeclarations.hasOwnProperty(0)) {
-          handleParesDeclaration(0, 'puede');
+          // In PARES declaration, pasoBtn becomes NO TENGO button
+          handleParesDeclaration(0, false);
         } else if (gameState.currentRound === 'JUEGO' && !gameState.juegoDeclarations.hasOwnProperty(0)) {
-          handleJuegoDeclaration(0, 'puede');
+          // In JUEGO declaration, pasoBtn becomes NO TENGO button
+          handleJuegoDeclaration(0, false);
         } else if (gameState.currentRound === 'MUS') {
           handleMusRound(0, 'paso');
         } else {
@@ -6714,7 +6717,13 @@ function initGame() {
 
     if (acceptBtn) acceptBtn.onclick = () => {
       if (gameState.activePlayerIndex === 0) {
-        if (gameState.currentRound === 'GRANDE' || gameState.currentRound === 'CHICA' || 
+        if (gameState.currentRound === 'PARES' && !gameState.paresDeclarations.hasOwnProperty(0)) {
+          // In PARES declaration, acceptBtn becomes PUEDE button
+          handleParesDeclaration(0, 'puede');
+        } else if (gameState.currentRound === 'JUEGO' && !gameState.juegoDeclarations.hasOwnProperty(0)) {
+          // In JUEGO declaration, acceptBtn becomes PUEDE button
+          handleJuegoDeclaration(0, 'puede');
+        } else if (gameState.currentRound === 'GRANDE' || gameState.currentRound === 'CHICA' || 
             gameState.currentRound === 'PARES' || gameState.currentRound === 'JUEGO') {
           handleBettingRound(0, 'accept');
         }
@@ -6932,38 +6941,40 @@ function initGame() {
         buttons[4].style.display = 'inline-flex';
         acceptButton.style.display = 'none';
       } else if (inParesDeclaration) {
-        // In PARES declaration phase - show TENGO, NO TENGO, PUEDE only
-        if (button1Label) button1Label.textContent = 'TENGO';
-        if (button2Label) button2Label.textContent = 'NO TENGO';
-        if (button3Label) button3Label.textContent = 'PUEDE';
-        musButton.style.display = 'inline-flex'; // Show TENGO button
-        buttons[1].style.display = 'inline-flex'; // Show NO TENGO button
-        buttons[2].style.display = 'inline-flex'; // Show PUEDE button
-        acceptButton.style.display = 'none'; // Hide ACCEPT during declaration
+        // In PARES declaration phase - use buttons[1], [2], [3] for TENGO, NO TENGO, PUEDE
+        // The MUS button (button[0]) should NEVER appear after MUS round
+        if (button2Label) button2Label.textContent = 'TENGO';
+        if (button3Label) button3Label.textContent = 'NO TENGO';
+        if (button4Label) button4Label.textContent = 'PUEDE';
+        musButton.style.display = 'none'; // ALWAYS hide MUS button after MUS round
+        buttons[1].style.display = 'inline-flex'; // Show TENGO button (envidoBtn)
+        buttons[2].style.display = 'inline-flex'; // Show NO TENGO button (pasoBtn)
+        buttons[3].style.display = 'inline-flex'; // Show PUEDE button (acceptBtn)
         buttons[4].style.display = 'none'; // Hide ÓRDAGO during declaration
         
         // Ensure buttons are enabled if it's local player's turn
         if (gameState.activePlayerIndex === 0) {
-          musButton.disabled = false;
           buttons[1].disabled = false;
           buttons[2].disabled = false;
+          buttons[3].disabled = false;
         }
       } else if (inJuegoDeclaration) {
-        // In JUEGO declaration phase - show TENGO, NO TENGO, PUEDE only
-        if (button1Label) button1Label.textContent = 'TENGO JUEGO';
-        if (button2Label) button2Label.textContent = 'NO TENGO';
-        if (button3Label) button3Label.textContent = 'PUEDE';
-        musButton.style.display = 'inline-flex'; // Show TENGO button
-        buttons[1].style.display = 'inline-flex'; // Show NO TENGO button
-        buttons[2].style.display = 'inline-flex'; // Show PUEDE button
-        acceptButton.style.display = 'none'; // Hide ACCEPT during declaration
+        // In JUEGO declaration phase - use buttons[1], [2], [3] for TENGO, NO TENGO, PUEDE
+        // The MUS button (button[0]) should NEVER appear after MUS round
+        if (button2Label) button2Label.textContent = 'TENGO JUEGO';
+        if (button3Label) button3Label.textContent = 'NO TENGO';
+        if (button4Label) button4Label.textContent = 'PUEDE';
+        musButton.style.display = 'none'; // ALWAYS hide MUS button after MUS round
+        buttons[1].style.display = 'inline-flex'; // Show TENGO button (envidoBtn)
+        buttons[2].style.display = 'inline-flex'; // Show NO TENGO button (pasoBtn)
+        buttons[3].style.display = 'inline-flex'; // Show PUEDE button (acceptBtn)
         buttons[4].style.display = 'none'; // Hide ÓRDAGO during declaration
         
         // Ensure buttons are enabled if it's local player's turn
         if (gameState.activePlayerIndex === 0) {
-          musButton.disabled = false;
           buttons[1].disabled = false;
           buttons[2].disabled = false;
+          buttons[3].disabled = false;
         }
       } else if (hasActiveBet && isOpponentsBet) {
         // There's an active bet from the OPPONENT team - show response buttons only
