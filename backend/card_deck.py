@@ -2,9 +2,10 @@
 Quantum Card and Deck Management
 """
 
-import random
 import logging
 import hashlib
+import random  # Only for deterministic seed-based collapse (multiplayer sync)
+from Logica_cuantica.quantum_random import get_quantum_rng
 
 logger = logging.getLogger(__name__)
 
@@ -85,12 +86,13 @@ class QuantumCard:
                 self.entangled_partner_suit = 'bastos' if self.suit == 'espadas' else 'espadas'
         
         # Other cards can be in superposition unless entangled
-        if not self.is_entangled and random.random() > 0.5:
+        qrng = get_quantum_rng()
+        if not self.is_entangled and qrng.random_float() > 0.5:
             self.is_superposed = True
             self._set_superposition()
     
     def _set_superposition(self):
-        """Set superposition state with another card value"""
+        """Set superposition state with another card value using quantum randomness"""
         card_values = ['4', '5', '6', '7', 'J', 'Q']
         
         if self.value not in card_values:
@@ -102,8 +104,9 @@ class QuantumCard:
         else:
             self.superposed_value = card_values[0]
         
-        # Random coefficients that sum to 1 (squared)
-        alpha = random.uniform(0.5, 0.9)
+        # Random coefficients that sum to 1 (squared) using quantum RNG
+        qrng = get_quantum_rng()
+        alpha = 0.5 + qrng.random_float() * 0.4  # Range [0.5, 0.9]
         beta = (1 - alpha**2)**0.5
         
         self.coefficient_a = round(alpha, 2)
@@ -130,14 +133,15 @@ class QuantumCard:
         else:
             # Probabilistic or seeded collapse
             if collapse_seed:
-                # Use seed for determinism across all clients
+                # Use seed for determinism across all clients (multiplayer sync)
                 hash_obj = hashlib.sha256(str(collapse_seed).encode())
                 seed_int = int(hash_obj.hexdigest(), 16)
                 rng = random.Random(seed_int)
                 collapse_prob = rng.random()
             else:
-                # Non-deterministic (fallback)
-                collapse_prob = random.random()
+                # Non-deterministic quantum collapse
+                qrng = get_quantum_rng()
+                collapse_prob = qrng.random_float()
             
             # For entangled cards: collapse to original or partner value
             if self.is_entangled:
@@ -205,8 +209,9 @@ class QuantumDeck:
         logger.info(f"Initialized {self.game_mode} reyes deck with {len(self.cards)} cards")
     
     def shuffle(self):
-        """Shuffle the deck"""
-        random.shuffle(self.cards)
+        """Shuffle the deck using quantum randomness"""
+        qrng = get_quantum_rng()
+        self.cards = qrng.shuffle(self.cards)
     
     def deal(self, num_cards):
         """Deal cards from the deck"""

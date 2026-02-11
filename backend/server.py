@@ -15,7 +15,6 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 import logging
 import os
 from datetime import datetime
-import random  # Only used for non-game room codes
 import time
 import threading
 
@@ -175,8 +174,10 @@ def _check_and_emit_auto_declaration(room_id, game, round_name):
     
     declarations = game.state[key]
     
-    # If all players have declared, we're in betting phase
+    # If all players have declared, check if we need to transition to PUNTO or start betting
     if len(declarations) >= 4:
+        if current_round == 'JUEGO':
+            _handle_juego_declarations_complete(room_id, game)
         return False
     
     # Keep checking players until finding one that needs manual declaration
@@ -231,11 +232,93 @@ def _check_and_emit_auto_declaration(room_id, game, round_name):
         
         auto_declared_count += 1
         
-        # Small delay between auto-declarations for visual clarity
+        # Delay between auto-declarations for visual clarity (2s to let players see each declaration)
         if len(declarations) < 4:
-            eventlet.sleep(0.5) if eventlet else None
+            eventlet.sleep(2.0) if eventlet else None
     
     return auto_declared_count > 0
+
+
+def _handle_juego_declarations_complete(room_id, game):
+    """
+    Handle completion of all JUEGO declarations. 
+    Determine if we should start JUEGO betting, PUNTO betting, or move to CONTEO.
+    """
+    declarations = game.state.get('juegoDeclarations', {})
+    if len(declarations) < 4:
+        return  # Not all declarations complete yet
+    
+    # Count declarations per team
+    team1_players = game.teams['team1']['players']
+    team2_players = game.teams['team2']['players']
+    
+    team1_tengo = sum(1 for p in team1_players if declarations.get(p) in [True, 'tengo_after_penalty'])
+    team1_puede = sum(1 for p in team1_players if declarations.get(p) == 'puede')
+    team1_no_tengo = sum(1 for p in team1_players if declarations.get(p) == False)
+    
+    team2_tengo = sum(1 for p in team2_players if declarations.get(p) in [True, 'tengo_after_penalty'])
+    team2_puede = sum(1 for p in team2_players if declarations.get(p) == 'puede')
+    team2_no_tengo = sum(1 for p in team2_players if declarations.get(p) == False)
+    
+    logger.info(f"JUEGO declarations complete - Team1: {team1_tengo} tengo, {team1_puede} puede, {team1_no_tengo} no tengo | Team2: {team2_tengo} tengo, {team2_puede} puede, {team2_no_tengo} no tengo")
+    
+    # Check if everyone said "puede" → start PUNTO betting
+    everyone_puede = (team1_puede == 2 and team2_puede == 2)
+    if everyone_puede:
+        logger.info('Everyone said PUEDE - transitioning to PUNTO betting')
+        game.state['currentRound'] = 'PUNTO'
+        game.state['activePlayerIndex'] = game.state['manoIndex']
+        socketio.emit('round_transition', {
+            'round': 'PUNTO',
+            'reason': 'everyone_puede',
+            'active_player': game.state['manoIndex'],
+            'game_state': game.get_public_state()
+        }, room=room_id)
+        return
+    
+    # Check if no one has JUEGO (all said "no tengo") → start PUNTO betting
+    no_one_has_juego = (team1_tengo == 0 and team2_tengo == 0 and team1_puede == 0 and team2_puede == 0)
+    if no_one_has_juego:
+        logger.info('No one has JUEGO (all NO TENGO) - transitioning to PUNTO betting')
+        game.state['currentRound'] = 'PUNTO'
+        game.state['activePlayerIndex'] = game.state['manoIndex']
+        socketio.emit('round_transition', {
+            'round': 'PUNTO',
+            'reason': 'no_juego',
+            'active_player': game.state['manoIndex'],
+            'game_state': game.get_public_state()
+        }, room=room_id)
+        return
+    
+    # Check betting conditions
+    team1_has_interest = (team1_tengo + team1_puede >= 1)
+    team2_has_interest = (team2_tengo + team2_puede >= 1)
+    team1_all_no_tengo = (team1_no_tengo == 2)
+    team2_all_no_tengo = (team2_no_tengo == 2)
+    
+    should_skip_betting = (team1_has_interest and team2_all_no_tengo) or (team2_has_interest and team1_all_no_tengo)
+    
+    if should_skip_betting:
+        # Only one team has interest - start PUNTO betting (no competition for JUEGO)
+        logger.info('Only one team has interest - transitioning to PUNTO betting')
+        game.state['currentRound'] = 'PUNTO'
+        game.state['activePlayerIndex'] = game.state['manoIndex']
+        socketio.emit('round_transition', {
+            'round': 'PUNTO',
+            'reason': 'one_team_interest',
+            'active_player': game.state['manoIndex'],
+            'game_state': game.get_public_state()
+        }, room=room_id)
+    else:
+        # Both teams have interest - start JUEGO betting
+        logger.info('Both teams have interest - starting JUEGO betting')
+        game.state['juegoPhase'] = 'betting'
+        game.state['activePlayerIndex'] = game.state['manoIndex']
+        socketio.emit('betting_phase_started', {
+            'round': 'JUEGO',
+            'active_player': game.state['manoIndex'],
+            'game_state': game.get_public_state()
+        }, room=room_id)
 
 
 def _schedule_discard_timeout(room_id):

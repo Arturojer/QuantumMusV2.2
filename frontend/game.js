@@ -254,7 +254,8 @@ function resetRoundState() {
     betType: null,
     responses: {},
     raiseCount: 0,
-    previousAmount: 0
+    previousAmount: 0,
+    isFirstBet: true
   };
   gameState.allPlayersPassed = false;
 
@@ -1276,6 +1277,51 @@ function initGame() {
         console.warn('[socket:cards_collapsed] handler failed', e);
       }
     });
+    
+    socket.on('round_transition', (data) => {
+      console.log(`[ONLINE] Round transition to ${data.round}, reason: ${data.reason}`);
+      
+      // Update local game state
+      gameState.currentRound = data.round;
+      gameState.activePlayerIndex = serverToLocal(data.active_player);
+      
+      // Apply server state update if included
+      if (data.game_state) {
+        applyServerSnapshot(data);
+      }
+      
+      // If transitioning to PUNTO, call startPuntoBetting
+      if (data.round === 'PUNTO') {
+        console.log('[ONLINE] Starting PUNTO betting phase');
+        startPuntoBetting();
+      }
+      
+      updateRoundDisplay();
+      updateScoreboard();
+    });
+    
+    socket.on('betting_phase_started', (data) => {
+      console.log(`[ONLINE] Betting phase started for ${data.round}`);
+      
+      // Update local game state
+      gameState.activePlayerIndex = serverToLocal(data.active_player);
+      
+      // Apply server state update if included
+      if (data.game_state) {
+        applyServerSnapshot(data);
+      }
+      
+      // Initialize betting phase
+      if (data.round === 'JUEGO') {
+        gameState.juegoPhase = 'betting';
+      } else if (data.round === 'PARES') {
+        gameState.paresPhase = 'betting';
+      }
+      
+      startPlayerTurnTimer(gameState.activePlayerIndex);
+      updateScoreboard();
+    });
+    
     socket.on('cards_discarded', (data) => {
       try {
         const localIdx = serverToLocal(data.player_index);
@@ -2279,28 +2325,29 @@ function initGame() {
         
         if (allDefendersPassed) {
           // Both defenders passed - bet rejected
-          // TODO: Fix cumulative rejection point calculation
-          // Current bug: Only awards previousAmount for single raise, not cumulative total
-          // Should track raiseCount and:
-          // - First bet rejected (no raises): 1 point
-          // - Single raise rejected: award previousAmount (amount before last raise)
-          // - Multiple raises rejected: award cumulative total (currentBet.amount)
-          // Backend already implements this correctly, but frontend needs sync
+          // Award points based on bet history:
+          // - First bet (no raises): 1 point
+          // - Single raise: previousAmount (the bet before the raise)
+          // - Multiple raises: cumulative total (currentBet.amount)
           let points;
-          if (gameState.currentRound === 'PUNTO') {
-            points = 2; // PUNTO rejection always gives 2 points
+          const isOrdago = gameState.currentBet.betType === 'ordago';
+          const raiseCount = gameState.currentBet.raiseCount || 0;
+          const isFirstBet = gameState.currentBet.isFirstBet !== false; // Default true if not set
+          
+          if (isFirstBet && raiseCount === 0) {
+            // First bet rejected (including ÓRDAGO as first bet): 1 point
+            points = 1;
+            console.log(`[REJECTION] First bet rejected - awarding 1 point`);
+          } else if (raiseCount === 1) {
+            // Single raise rejected: award the bet BEFORE the raise
+            points = gameState.currentBet.previousAmount || 1;
+            console.log(`[REJECTION] Bet rejected after single raise - awarding previous amount: ${points}`);
           } else {
-            // TEMPORARY FIX: Use backend logic when available via socket
-            // For now, use current logic but this is INCORRECT for multiple raises
-            const raiseCount = gameState.currentBet.raiseCount || 0;
-            if (raiseCount === 0) {
-              points = 1; // First bet, no raises
-            } else if (raiseCount === 1) {
-              points = gameState.currentBet.previousAmount || gameState.currentBet.amount;
-            } else {
-              points = gameState.currentBet.amount; // Multiple raises - cumulative
-            }
+            // Multiple raises rejected: award cumulative total
+            points = gameState.currentBet.amount;
+            console.log(`[REJECTION] Bet rejected after ${raiseCount} raises - awarding cumulative: ${points}`);
           }
+          
           gameState.teams[gameState.currentBet.bettingTeam].score += points;
           console.log(`Team ${gameState.currentBet.bettingTeam} wins ${points} points (bet rejected in ${gameState.currentRound})`);
           showTeamPointAward(gameState.currentBet.bettingTeam, points, 'rechazado');
@@ -2416,9 +2463,10 @@ function initGame() {
         console.log(`[BET ACCEPT] Player ${playerIndex + 1} accepting in PUNTO - collapsing cards`);
         collapseOnBetAcceptance(playerIndex, 'PUNTO');
         
-        // Check penalty after collapse (can still be penalized if had JUEGO)
+        // Check penalty after collapse (penalized if they actually have JUEGO)
+        // In PUNTO betting, player is implicitly saying "no juego" (false)
         setTimeout(() => {
-          checkPredictionPenalty(playerIndex, 'PUNTO', true);
+          checkPredictionPenalty(playerIndex, 'PUNTO', false);
         }, 100);
       }
       
@@ -2479,9 +2527,10 @@ function initGame() {
         console.log(`[BET PLACE] Player ${playerIndex + 1} betting in PUNTO - collapsing cards`);
         collapseOnBetAcceptance(playerIndex, 'PUNTO');
         
-        // Check penalty after collapse (can still be penalized if had JUEGO)
+        // Check penalty after collapse (penalized if they actually have JUEGO)
+        // In PUNTO betting, player is implicitly saying "no juego" (false)
         setTimeout(() => {
-          checkPredictionPenalty(playerIndex, 'PUNTO', true);
+          checkPredictionPenalty(playerIndex, 'PUNTO', false);
         }, 100);
       }
       
@@ -2494,6 +2543,7 @@ function initGame() {
       gameState.currentBet.betType = 'envido';
       gameState.currentBet.isRaise = isRaise;
       gameState.currentBet.raiseCount = (gameState.currentBet.raiseCount || 0) + (isRaise ? 1 : 0);
+      gameState.currentBet.isFirstBet = false; // No longer first bet after placement
       gameState.currentBet.responses = {};
 
       // Mark that a bet was placed this round (used later at CONTEO to decide 1pt)
@@ -2556,6 +2606,7 @@ function initGame() {
       gameState.currentBet.betType = 'ordago';
       gameState.currentBet.responses = {};
       gameState.currentBet.raiseCount = gameState.currentBet.raiseCount || 0; // Preserve if raised to ordago
+      gameState.currentBet.isFirstBet = false; // No longer first bet after ÓRDAGO placement
       
       // Turn goes to defending team, starting with closest to mano
       const manoTeam = getPlayerTeam(gameState.manoIndex);
@@ -3905,6 +3956,26 @@ function initGame() {
       gameState.currentRound = 'PUNTO';
       startPuntoBetting();
     }
+  }
+  
+  function startPuntoBetting() {
+    console.log('Starting PUNTO betting - all players compete for highest sum');
+    
+    // Reset bet state for PUNTO betting phase
+    gameState.currentBet = {
+      amount: 0,
+      previousAmount: 0,
+      betType: null,
+      bettingTeam: null,
+      playerMakingBet: null,
+      responses: {},
+      waitingForResponse: false
+    };
+    
+    // Start betting from mano
+    gameState.activePlayerIndex = gameState.manoIndex;
+    startPlayerTurnTimer(gameState.activePlayerIndex);
+    updateScoreboard();
   }
   
   function calculateJuego(cards) {

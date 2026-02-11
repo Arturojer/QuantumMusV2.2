@@ -358,6 +358,14 @@ class QuantumMusGame:
         """Progress to the next round"""
         round_order = ['MUS', 'GRANDE', 'CHICA', 'PARES', 'JUEGO']
         
+        # Special handling for PUNTO round (which follows JUEGO)
+        if self.state['currentRound'] == 'PUNTO':
+            # PUNTO is the final betting round - move to CONTEO
+            logger.info("PUNTO round complete - resolving comparisons and starting new hand")
+            self._resolve_deferred_comparisons()
+            self.start_new_hand()
+            return True  # Hand ended
+        
         current_idx = round_order.index(self.state['currentRound'])
         
         if current_idx < len(round_order) - 1:
@@ -386,7 +394,7 @@ class QuantumMusGame:
     def start_new_hand(self):
         """Start a new hand"""
         # Validate current state before resetting
-        if self.state['currentRound'] not in ['MUS', 'GRANDE', 'CHICA', 'PARES', 'JUEGO']:
+        if self.state['currentRound'] not in ['MUS', 'GRANDE', 'CHICA', 'PARES', 'JUEGO', 'PUNTO']:
             logger.warning(f"Invalid round state before new hand: {self.state['currentRound']}")
         
         # Rotate mano to next player (counterclockwise/right)
@@ -478,7 +486,8 @@ class QuantumMusGame:
         def eligible_team_players(round_name, team):
             declarations = get_declarations(round_name)
             team_players = self.state['teams'][team]['players']
-            eligible = [p for p in team_players if declarations.get(p) is True]
+            # Include players who declared True or 'tengo_after_penalty'
+            eligible = [p for p in team_players if declarations.get(p) in [True, 'tengo_after_penalty']]
             return eligible
 
         def calculate_pares(cards):

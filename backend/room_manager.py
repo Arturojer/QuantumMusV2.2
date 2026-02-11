@@ -4,9 +4,9 @@ Room Manager - Handles game rooms and lobbies
 
 import uuid
 import logging
-import random
 import string
 from datetime import datetime
+from Logica_cuantica.quantum_random import get_quantum_rng
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +20,11 @@ class RoomManager:
         self.room_codes = {}  # room_code -> room_id (for easy lookup)
     
     def _generate_room_code(self):
-        """Generate a unique 4-character room code"""
+        """Generate a unique 4-character room code using quantum randomness"""
+        qrng = get_quantum_rng()
+        chars = string.ascii_uppercase + string.digits
         while True:
-            code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+            code = ''.join(qrng.random_choice(list(chars)) for _ in range(4))
             if code not in self.room_codes:
                 return code
     
