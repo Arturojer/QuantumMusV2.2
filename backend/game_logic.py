@@ -97,8 +97,10 @@ class QuantumMusGame:
         # Game state
         self.state = {
             'currentRound': 'MUS',
+            'currentPhase': 'DEALING',  # DEALING -> DECLARATION -> VALIDATION -> BETTING -> RESOLUTION
             'manoIndex': 0,
             'activePlayerIndex': 0,
+            'declarationComplete': False,  # Flag to track when declaration phase is done
             'teams': teams,
             'currentBet': {
                 'amount': 0,
@@ -319,8 +321,97 @@ class QuantumMusGame:
         # Add player's hand
         state['my_hand'] = [card.to_dict() for card in self.hands.get(player_index, [])]
         state['my_index'] = player_index
+        
+        # Add entanglement glow information
+        state['entanglement_glows'] = self.get_entanglement_glows(player_index)
+        
         print(f"DEBUG: Enviando estado a jugador {player_index}. Datos de mano: {state.get('my_hand')}")
         return state
+    
+    def get_entanglement_glows(self, player_index):
+        """
+        Detectar si el jugador y su compañero tienen cartas entrelazadas.
+        Retorna información sobre qué cartas deben brillar (glow).
+        
+        Returns:
+            dict: {
+                'has_entangled_pair': bool,
+                'my_cards': [indices de cartas que brillan],
+                'teammate_has_partner': bool,
+                'pairs': [{
+                    'my_card_index': int,
+                    'my_card': dict,
+                    'teammate_index': int,
+                    'teammate_has_partner': bool
+                }]
+            }
+        """
+        my_hand = self.hands.get(player_index, [])
+        if not my_hand:
+            return {'has_entangled_pair': False, 'my_cards': [], 'pairs': []}
+        
+        # Obtener compañero de equipo
+        my_team = self.get_player_team(player_index)
+        if not my_team:
+            return {'has_entangled_pair': False, 'my_cards': [], 'pairs': []}
+        
+        team_players = self.state['teams'][my_team]['players']
+        teammate_index = None
+        for p in team_players:
+            if p != player_index:
+                teammate_index = p
+                break
+        
+        if teammate_index is None:
+            return {'has_entangled_pair': False, 'my_cards': [], 'pairs': []}
+        
+        teammate_hand = self.hands.get(teammate_index, [])
+        
+        # Buscar pares entrelazados entre mi mano y la de mi compañero
+        glowing_cards = []
+        pairs = []
+        
+        for my_idx, my_card in enumerate(my_hand):
+            if not getattr(my_card, 'is_entangled', False):
+                continue
+            
+            # Esta carta está entrelazada - buscar su pareja en mano del compañero
+            my_palo = getattr(my_card, 'palo', None) or my_card.get('palo')
+            my_valor = getattr(my_card, 'valor', None) or my_card.get('valor')
+            partner_valor = getattr(my_card, 'entangled_partner_value', None)
+            
+            if not partner_valor:
+                continue
+            
+            # Buscar si el compañero tiene la carta pareja
+            teammate_has = False
+            for tm_card in teammate_hand:
+                tm_palo = getattr(tm_card, 'palo', None) or tm_card.get('palo')
+                tm_valor = getattr(tm_card, 'valor', None) or tm_card.get('valor')
+                
+                # Verificar si es la pareja (mismo palo, valor complementario)
+                if tm_palo == my_palo and tm_valor == partner_valor:
+                    teammate_has = True
+                    break
+            
+            if teammate_has:
+                glowing_cards.append(my_idx)
+                pairs.append({
+                    'my_card_index': my_idx,
+                    'my_card': my_card.to_dict() if hasattr(my_card, 'to_dict') else my_card,
+                    'teammate_index': teammate_index,
+                    'teammate_has_partner': True,
+                    'palo': my_palo,
+                    'my_valor': my_valor,
+                    'partner_valor': partner_valor
+                })
+        
+        return {
+            'has_entangled_pair': len(glowing_cards) > 0,
+            'my_cards': glowing_cards,
+            'teammate_index': teammate_index if glowing_cards else None,
+            'pairs': pairs
+        }
     
     def get_player_team(self, player_index):
         """Get team for a player"""

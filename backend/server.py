@@ -248,6 +248,10 @@ def _handle_juego_declarations_complete(room_id, game):
     if len(declarations) < 4:
         return  # Not all declarations complete yet
     
+    # Mark declaration phase as complete and reset active player to mano
+    game.complete_declaration_phase()
+    game.set_phase('VALIDATION')
+    
     # Count declarations per team
     team1_players = game.state['teams']['team1']['players']
     team2_players = game.state['teams']['team2']['players']
@@ -267,7 +271,8 @@ def _handle_juego_declarations_complete(room_id, game):
     if everyone_puede:
         logger.info('Everyone said PUEDE - transitioning to PUNTO betting')
         game.state['currentRound'] = 'PUNTO'
-        game.state['activePlayerIndex'] = game.state['manoIndex']
+        game.set_phase('BETTING')
+        # activePlayerIndex already set to manoIndex by complete_declaration_phase()
         socketio.emit('round_transition', {
             'round': 'PUNTO',
             'reason': 'everyone_puede',
@@ -281,7 +286,8 @@ def _handle_juego_declarations_complete(room_id, game):
     if no_one_has_juego:
         logger.info('No one has JUEGO (all NO TENGO) - transitioning to PUNTO betting')
         game.state['currentRound'] = 'PUNTO'
-        game.state['activePlayerIndex'] = game.state['manoIndex']
+        game.set_phase('BETTING')
+        # activePlayerIndex already set to manoIndex by complete_declaration_phase()
         socketio.emit('round_transition', {
             'round': 'PUNTO',
             'reason': 'no_juego',
@@ -302,7 +308,8 @@ def _handle_juego_declarations_complete(room_id, game):
         # Only one team has interest - start PUNTO betting (no competition for JUEGO)
         logger.info('Only one team has interest - transitioning to PUNTO betting')
         game.state['currentRound'] = 'PUNTO'
-        game.state['activePlayerIndex'] = game.state['manoIndex']
+        game.set_phase('BETTING')
+        # activePlayerIndex already set to manoIndex by complete_declaration_phase()
         socketio.emit('round_transition', {
             'round': 'PUNTO',
             'reason': 'one_team_interest',
@@ -313,7 +320,8 @@ def _handle_juego_declarations_complete(room_id, game):
         # Both teams have interest - start JUEGO betting
         logger.info('Both teams have interest - starting JUEGO betting')
         game.state['juegoPhase'] = 'betting'
-        game.state['activePlayerIndex'] = game.state['manoIndex']
+        game.set_phase('BETTING')
+        # activePlayerIndex already set to manoIndex by complete_declaration_phase()
         socketio.emit('betting_phase_started', {
             'round': 'JUEGO',
             'active_player': game.state['manoIndex'],
@@ -1003,6 +1011,10 @@ def handle_player_declaration(data):
         logger.error(f"Game not found for room {room_id} in declaration event")
         return
     
+    # Set phase to DECLARATION if not already set
+    if game.state.get('currentPhase') != 'DECLARATION':
+        game.set_phase('DECLARATION')
+    
     if player_index != game.state['activePlayerIndex']:
         emit('game_error', {'error': 'Not your turn'})
         return
@@ -1035,6 +1047,15 @@ def handle_player_declaration(data):
         'is_auto_declared': is_auto_declared,
         'timestamp': datetime.utcnow().isoformat()
     }, room=room_id)
+    
+    # Check if all declarations are complete
+    if len(game.state[key]) >= 4:
+        # All declarations complete - handle transition
+        if round_name == 'PARES':
+            # For PARES, mark declaration complete and transition to betting or next round
+            game.complete_declaration_phase()
+            # TODO: Add PARES-specific transition logic if needed
+        # Note: JUEGO completion is handled by _handle_juego_declarations_complete called below
     
     # After declaration, check if next player can auto-declare
     if advance_turn and len(game.state[key]) < 4:

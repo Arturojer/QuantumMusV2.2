@@ -69,87 +69,47 @@ class EntanglementSystem:
         logger.info(f"Initialized entanglement system with mode {game_mode}")
     
     def _initialize_entangled_pairs(self):
-        """Set up entangled pairs based on game mode"""
-        # Team 1: Players 0 (Preskill) and 2 (Zoller)
-        # Team 2: Players 1 (Cirac) and 3 (Deutsch)
+        """
+        Set up entangled pairs based on game mode.
         
+        ENTRELAZAMIENTO CORRECTO:
+        - Rey (K/12) ↔ As (A/1) del MISMO palo
+        - Dos (2) ↔ Tres (3) del MISMO palo (solo en modo 8)
+        
+        Cada palo tiene su propio par entrelazado.
+        """
         pair_counter = 0
         
-        # ===== REYES (Kings) - Always entangled in both modes =====
-        # Team 1: Rey de Oros ↔ Rey de Copas
-        pair_id = f'pair_{pair_counter}'
-        pair = EntangledPair(
-            pair_id, 
-            'K', 'oros', 'K', 'copas',
-            0, 2, 1
-        )
-        self.entangled_pairs[pair_id] = pair
-        self.card_to_pair[('K', 'oros')] = pair_id
-        self.card_to_pair[('K', 'copas')] = pair_id
-        pair_counter += 1
+        # ===== REY ↔ AS - Siempre entrelazados en todos los palos =====
+        for suit_spanish, suit_english in [('Oro', 'oros'), ('Copa', 'copas'), 
+                                            ('Espada', 'espadas'), ('Basto', 'bastos')]:
+            pair_id = f'pair_rey_as_{suit_english}'
+            pair = EntangledPair(
+                pair_id, 
+                'K', suit_english,  # Rey
+                'A', suit_english,  # As
+                None, None, None    # No team assignment (same suit entanglement)
+            )
+            self.entangled_pairs[pair_id] = pair
+            self.card_to_pair[('K', suit_english)] = pair_id
+            self.card_to_pair[('A', suit_english)] = pair_id
+            pair_counter += 1
         
-        # Team 2: Rey de Espadas ↔ Rey de Bastos
-        pair_id = f'pair_{pair_counter}'
-        pair = EntangledPair(
-            pair_id,
-            'K', 'espadas', 'K', 'bastos',
-            1, 3, 2
-        )
-        self.entangled_pairs[pair_id] = pair
-        self.card_to_pair[('K', 'espadas')] = pair_id
-        self.card_to_pair[('K', 'bastos')] = pair_id
-        pair_counter += 1
-        
-        # ===== TRESES (3s) - Entangled in 8 Kings mode only =====
+        # ===== DOS ↔ TRES - Entrelazados en modo 8 solamente =====
         if self.game_mode == '8':
-            # Team 1: 3 de Oros ↔ 3 de Copas
-            pair_id = f'pair_{pair_counter}'
-            pair = EntangledPair(
-                pair_id,
-                '3', 'oros', '3', 'copas',
-                0, 2, 1
-            )
-            self.entangled_pairs[pair_id] = pair
-            self.card_to_pair[('3', 'oros')] = pair_id
-            self.card_to_pair[('3', 'copas')] = pair_id
-            pair_counter += 1
-            
-            # Team 2: 3 de Espadas ↔ 3 de Bastos
-            pair_id = f'pair_{pair_counter}'
-            pair = EntangledPair(
-                pair_id,
-                '3', 'espadas', '3', 'bastos',
-                1, 3, 2
-            )
-            self.entangled_pairs[pair_id] = pair
-            self.card_to_pair[('3', 'espadas')] = pair_id
-            self.card_to_pair[('3', 'bastos')] = pair_id
-            pair_counter += 1
-            
-            # ===== DOSES (2s) - Entangled in 8 Kings mode only =====
-            # Team 1: 2 de Oros ↔ 2 de Copas
-            pair_id = f'pair_{pair_counter}'
-            pair = EntangledPair(
-                pair_id,
-                '2', 'oros', '2', 'copas',
-                0, 2, 1
-            )
-            self.entangled_pairs[pair_id] = pair
-            self.card_to_pair[('2', 'oros')] = pair_id
-            self.card_to_pair[('2', 'copas')] = pair_id
-            pair_counter += 1
-            
-            # Team 2: 2 de Espadas ↔ 2 de Bastos
-            pair_id = f'pair_{pair_counter}'
-            pair = EntangledPair(
-                pair_id,
-                '2', 'espadas', '2', 'bastos',
-                1, 3, 2
-            )
-            self.entangled_pairs[pair_id] = pair
-            self.card_to_pair[('2', 'espadas')] = pair_id
-            self.card_to_pair[('2', 'bastos')] = pair_id
-            pair_counter += 1
+            for suit_spanish, suit_english in [('Oro', 'oros'), ('Copa', 'copas'), 
+                                                ('Espada', 'espadas'), ('Basto', 'bastos')]:
+                pair_id = f'pair_dos_tres_{suit_english}'
+                pair = EntangledPair(
+                    pair_id,
+                    '2', suit_english,  # Dos
+                    '3', suit_english,  # Tres
+                    None, None, None    # No team assignment (same suit entanglement)
+                )
+                self.entangled_pairs[pair_id] = pair
+                self.card_to_pair[('2', suit_english)] = pair_id
+                self.card_to_pair[('3', suit_english)] = pair_id
+                pair_counter += 1
     
     def is_card_entangled(self, value: str, suit: str) -> bool:
         """Check if a card is part of an entangled pair"""
