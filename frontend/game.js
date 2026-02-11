@@ -4527,6 +4527,100 @@ function initGame() {
     }, 4500);
   }
   
+  // Display CONTEO results for online mode
+  function displayOnlineConteoResults(data) {
+    console.log('[ONLINE CONTEO] Displaying results:', data);
+    
+    // Update game state with new scores
+    gameState.teams.team1.score = data.team_scores.team1;
+    gameState.teams.team2.score = data.team_scores.team2;
+    updateScoreboard();
+    
+    // Check if game ended
+    if (data.game_ended) {
+      console.log('[ONLINE CONTEO] Game ended, winner:', data.winner_team);
+      // Game over will be shown by game_ended event
+      return;
+    }
+    
+    // Build detailed breakdown from server results
+    let breakdownHTML = '';
+    
+    data.results.forEach(result => {
+      const winnerColor = result.winner === 'team1' ? '#2ec4b6' : '#ff9e6d';
+      const winnerName = result.winner === 'team1' ? 'Cop' : 'MM';
+      breakdownHTML += `
+        <div style="color: var(--paper-beige); font-size: 0.85rem; margin: 5px 0; text-align: left;">
+          <span style="color: #a78bfa;">${result.round}:</span>
+          <span style="color: ${winnerColor};">${winnerName}</span>
+          <span style="color: var(--circuit-blueprint);"> - ${result.points} punto${result.points !== 1 ? 's' : ''}</span>
+        </div>
+      `;
+    });
+    
+    const modal = createModal('#a78bfa');
+    modal.id = 'conteo-modal';
+    modal.innerHTML = `
+      <div class="modal-content" style="
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98));
+        border: 3px solid #a78bfa; border-radius: 25px; padding: 45px; text-align: center;
+        box-shadow: 0 15px 50px rgba(0, 0, 0, 0.5), 0 0 30px rgba(167, 139, 250, 0.4);
+        max-width: 550px; transform: scale(0.8); transition: transform 0.3s;
+      ">
+        <h2 style="color: #a78bfa; font-size: 2.2rem; margin-bottom: 20px; font-weight: 300; letter-spacing: 4px;">
+          MANO COMPLETADA
+        </h2>
+        ${breakdownHTML ? `<div style="margin: 20px auto; max-width: 400px;">${breakdownHTML}</div>` : ''}
+        <div style="display: flex; justify-content: space-around; margin: 30px 0;">
+          <div>
+            <p style="color: #2ec4b6; font-size: 1rem;">Copenhague</p>
+            <p style="color: #2ec4b6; font-size: 2.5rem; font-weight: bold;">${data.team_scores.team1}</p>
+          </div>
+          <div>
+            <p style="color: #ff9e6d; font-size: 1rem;">Bohmian</p>
+            <p style="color: #ff9e6d; font-size: 2.5rem; font-weight: bold;">${data.team_scores.team2}</p>
+          </div>
+        </div>
+        <button id="conteo-continue-btn" style="
+          background: linear-gradient(135deg, #a78bfa, #8b5cf6);
+          border: 2px solid #a78bfa;
+          border-radius: 12px;
+          color: white;
+          font-size: 1.1rem;
+          padding: 12px 40px;
+          cursor: pointer;
+          margin-top: 20px;
+          transition: all 0.3s;
+          box-shadow: 0 4px 15px rgba(167, 139, 250, 0.3);
+        " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+          CONTINUAR
+        </button>
+      </div>
+    `;
+    
+    document.body.appendChild(modal);
+    animateModal(modal);
+    
+    // Add event listener for continue button
+    const continueBtn = document.getElementById('conteo-continue-btn');
+    if (continueBtn) {
+      continueBtn.addEventListener('click', () => {
+        console.log('[ONLINE CONTEO] Player acknowledged, sending to server');
+        closeModal(modal);
+        
+        // Send acknowledgment to server to start new hand
+        const socket = window.QuantumMusSocket;
+        const roomId = window.QuantumMusOnlineRoom;
+        
+        if (socket && roomId) {
+          socket.emit('acknowledge_conteo', {
+            room_id: roomId
+          });
+        }
+      });
+    }
+  }
+  
   // Start new hand
   function startNewHand() {
     console.log('Starting new hand...');
