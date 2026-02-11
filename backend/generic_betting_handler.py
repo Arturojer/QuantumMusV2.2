@@ -276,8 +276,7 @@ class GenericBettingHandler:
         Both defenders rejected the bet.
         Points awarded depend on the bet sequence:
         - First bet rejected (no raises): 1 point
-        - One raise, then rejected: award original bet (before the raise)
-        - Two or more raises, then rejected: award cumulative total (current bet)
+        - Any raise rejected: award the bet before the last raise (previousBetAmount)
         Round phase ends.
         """
         phase = self.game.state[f'{self.round_type.lower()}Phase']
@@ -286,20 +285,16 @@ class GenericBettingHandler:
         raise_count = phase.get('raiseCount', 0)
         
         # Determine points to award based on bet history
-        if phase.get('isFirstBet', True):
+        if raise_count == 0:
             # First bet rejected with no raises: award 1 point
             points_awarded = 1
-            logger.info(f"First bet rejected in {self.round_type} - awarding 1 point")
-        elif raise_count == 1:
-            # Single raise, then rejected: award the bet BEFORE the raise
+            logger.info(f"First bet rejected in {self.round_type} (no raises) - awarding 1 point")
+        else:
+            # Any raise rejected: award the bet BEFORE the last raise
             points_awarded = phase.get('previousBetAmount', 1)
             if points_awarded == 0:
                 points_awarded = 1  # Safety fallback
-            logger.info(f"Bet rejected after single raise in {self.round_type} - awarding previous bet amount: {points_awarded}")
-        else:
-            # Two or more raises, then rejected: award cumulative total
-            points_awarded = phase['currentBetAmount']
-            logger.info(f"Bet rejected after {raise_count} raises in {self.round_type} - awarding cumulative total: {points_awarded}")
+            logger.info(f"Bet rejected after {raise_count} raise(s) in {self.round_type} - awarding previous bet amount: {points_awarded}")
         
         phase['result'] = {
             'winner': winning_team,

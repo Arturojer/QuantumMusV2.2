@@ -485,8 +485,8 @@ function initGame() {
   
   // Get players and game mode from lobby (set by initializeGame)
   const lobbyPlayers = window.currentPlayers || [];
-  // In online mode, default to '8' (8 reyes), in offline mode default to '4'
-  const gameMode = window.currentGameMode || (window.onlineMode ? '8' : '4');
+  // Default to '8' (8 reyes) for both online and offline modes
+  const gameMode = window.currentGameMode || '8';
   const localPlayerIndex = window.currentLocalPlayerIndex ?? 0;
   
   console.log('Game Mode:', gameMode);
@@ -2367,25 +2367,18 @@ function initGame() {
           // Both defenders passed - bet rejected
           // Award points based on bet history:
           // - First bet (no raises): 1 point
-          // - Single raise: previousAmount (the bet before the raise)
-          // - Multiple raises: cumulative total (currentBet.amount)
+          // - Any raise (including ordago): previousAmount (the bet before the raise)
           let points;
-          const isOrdago = gameState.currentBet.betType === 'ordago';
-          const raiseCount = gameState.currentBet.raiseCount || 0;
-          const isFirstBet = gameState.currentBet.isFirstBet !== false; // Default true if not set
+          const isRaise = gameState.currentBet.isRaise || (gameState.currentBet.raiseCount && gameState.currentBet.raiseCount > 0);
           
-          if (isFirstBet && raiseCount === 0) {
+          if (isRaise) {
+            // Any raise rejected (including ÓRDAGO as counter-raise): award the bet BEFORE the raise
+            points = gameState.currentBet.previousAmount || 1;
+            console.log(`[REJECTION] Bet rejected after raise - awarding previous amount: ${points}`);
+          } else {
             // First bet rejected (including ÓRDAGO as first bet): 1 point
             points = 1;
             console.log(`[REJECTION] First bet rejected - awarding 1 point`);
-          } else if (raiseCount === 1) {
-            // Single raise rejected: award the bet BEFORE the raise
-            points = gameState.currentBet.previousAmount || 1;
-            console.log(`[REJECTION] Bet rejected after single raise - awarding previous amount: ${points}`);
-          } else {
-            // Multiple raises rejected: award cumulative total
-            points = gameState.currentBet.amount;
-            console.log(`[REJECTION] Bet rejected after ${raiseCount} raises - awarding cumulative: ${points}`);
           }
           
           gameState.teams[gameState.currentBet.bettingTeam].score += points;
@@ -2641,12 +2634,23 @@ function initGame() {
         console.log(`[ORDAGO DECLARE] Player ${playerIndex + 1} declaring ORDAGO in ${gameState.currentRound} (GRANDE/CHICA) - no collapse on declaration`);
       }
       
+      // Check if this is a raise (ordago as counter to existing bet) or first bet
+      const isRaise = gameState.currentBet.bettingTeam && gameState.currentBet.bettingTeam !== playerTeam;
+      const previousAmount = isRaise ? gameState.currentBet.amount : 0;
+      
+      if (isRaise) {
+        console.log(`[ORDAGO] Counter-raise from bet of ${previousAmount} - previousAmount will be awarded if rejected`);
+      } else {
+        console.log(`[ORDAGO] First bet - 1 point will be awarded if rejected`);
+      }
+      
+      gameState.currentBet.previousAmount = previousAmount; // Save for rejection calculation
       gameState.currentBet.amount = 40;
       gameState.currentBet.bettingTeam = playerTeam;
       gameState.currentBet.betType = 'ordago';
       gameState.currentBet.responses = {};
-      gameState.currentBet.raiseCount = gameState.currentBet.raiseCount || 0; // Preserve if raised to ordago
-      gameState.currentBet.isFirstBet = false; // No longer first bet after ÓRDAGO placement
+      gameState.currentBet.isRaise = isRaise; // Track if this is a counter-raise
+      gameState.currentBet.raiseCount = (gameState.currentBet.raiseCount || 0) + (isRaise ? 1 : 0); // Increment if raise
       
       // Turn goes to defending team, starting with closest to mano
       const manoTeam = getPlayerTeam(gameState.manoIndex);
@@ -2865,7 +2869,7 @@ function initGame() {
   
   // Compare hands for Grande (higher cards)
   function compareHighCards(hands) {
-    const gameMode = window.currentGameMode || '4';
+    const gameMode = window.currentGameMode || '8';
     // High cards: 4 reyes = K, 8 reyes = K and 3
     const highCards = gameMode === '8' ? ['K', '3'] : ['K'];
     const cardOrder = gameMode === '8' 
@@ -2917,7 +2921,7 @@ function initGame() {
   
   // Compare hands for Chica (lower cards)
   function compareLowCards(hands) {
-    const gameMode = window.currentGameMode || '4';
+    const gameMode = window.currentGameMode || '8';
     // Low cards: 4 reyes = A, 8 reyes = A and 2
     const cardOrder = gameMode === '8' 
       ? ['K', '3', 'Q', 'J', '7', '6', '5', '4', 'A', '2']
@@ -3190,7 +3194,7 @@ function initGame() {
     const cards = getPlayerCards(playerIndex);
     const playerId = `player${playerIndex + 1}`;
     const cardElements = document.querySelectorAll(`#${playerId}-zone .quantum-card`);
-    const gameMode = window.currentGameMode || '4';
+    const gameMode = window.currentGameMode || '8';
     
     console.log(`[AUTO PARES] Player ${playerIndex + 1}, Mode: ${gameMode}, Cards:`, cards.map(c => c.value));
     console.log(`[AUTO PARES] Raw card data:`, Array.from(cardElements).map(el => ({
@@ -3535,7 +3539,7 @@ function initGame() {
   }
   
   function calculatePares(cards) {
-    const gameMode = window.currentGameMode || '4';
+    const gameMode = window.currentGameMode || '8';
     // Normalize values for PARES (pair equivalence):
     // 4 reyes: A, 2, 3, K are all INDEPENDENT - no equivalences
     // 8 reyes: A=2 (can form pair together), 3=K (can form pair together)
@@ -3603,7 +3607,7 @@ function initGame() {
     const cards = getPlayerCards(playerIndex);
     const playerId = `player${playerIndex + 1}`;
     const cardElements = document.querySelectorAll(`#${playerId}-zone .quantum-card`);
-    const gameMode = window.currentGameMode || '4';
+    const gameMode = window.currentGameMode || '8';
     
     // Get entangled card indices and their possible values
     const entangledIndices = [];
@@ -4019,7 +4023,7 @@ function initGame() {
   }
   
   function calculateJuego(cards) {
-    const gameMode = window.currentGameMode || '4';
+    const gameMode = window.currentGameMode || '8';
     // Valores de PUNTO (no pares):
     // A = 1 punto (siempre)
     // 2 = 2 puntos (4 reyes) o 1 punto (8 reyes)
@@ -4519,8 +4523,14 @@ function initGame() {
             const bottomLabel = document.createElement('div');
             bottomLabel.className = 'dirac-label card-bottom';
             bottomLabel.style.color = suitColor;
-            const partner = card.dataset.partner || card.dataset.superposedValue || value;
-            bottomLabel.innerHTML = `⟨${partner}|`;
+            
+            if (isEntangled && entangledPartner) {
+              // Para entrelazadas: mostrar el partner
+              bottomLabel.innerHTML = `|${entangledPartner}⟩`;
+            } else {
+              // Para normales: mostrar el mismo valor
+              bottomLabel.innerHTML = `|${value}⟩`;
+            }
             card.appendChild(bottomLabel);
             
             // Add Bloch sphere for revealed cards
@@ -4809,7 +4819,7 @@ function initGame() {
   
   // Deal initial cards to all players at the start of a new hand
   function dealInitialCards() {
-    const gameMode = window.currentGameMode || '4';
+    const gameMode = window.currentGameMode || '8';
     const cardValues = gameMode === '8' 
       ? ['A', '2', '4', '5', '6', '7', 'J', 'Q', 'K']  // No 3s in 8 reyes
       : ['A', '2', '3', '4', '5', '6', '7', 'J', 'Q', 'K'];
@@ -5708,7 +5718,7 @@ function initGame() {
           }
         });
 
-        const gameMode = window.currentGameMode || '4';
+        const gameMode = window.currentGameMode || '8';
         const juegoProbStr = calculateJuegoProbability(cardValues, entangledInfo, gameMode);
         const juegoProb = parseInt(juegoProbStr, 10);
 
@@ -6054,7 +6064,7 @@ function initGame() {
         });
         
         // Generate new random cards to replace the discarded ones
-        const gameMode = window.currentGameMode || '4';
+        const gameMode = window.currentGameMode || '8';
         const cardValues = gameMode === '8' 
           ? ['A', '2', '3', '4', '5', '6', '7', 'J', 'Q', 'K']
           : ['A', '2', '3', '4', '5', '6', '7', 'J', 'Q', 'K'];
@@ -6788,7 +6798,7 @@ function initGame() {
     });
     
     // Calculate new probabilities
-    const gameMode = window.currentGameMode || '4';
+    const gameMode = window.currentGameMode || '8';
     const paresProb = calculateParesProbability(cardValues, entangledInfo, superposedInfo);
     const juegoProb = calculateJuegoProbability(cardValues, entangledInfo, gameMode);
     
@@ -7186,7 +7196,7 @@ function initGame() {
     // 4 reyes: A, 2, 3, K son independientes (no forman pares entre sí)
     // 8 reyes: A=2 (forman par), 3=K (forman par)
     
-    const gameMode = window.currentGameMode || '4';
+    const gameMode = window.currentGameMode || '8';
     console.log(`[PARES PROB] Mode: ${gameMode}, Cards:`, cardValues, 'Entangled:', entangledInfo.length);
     
     const normalizeValue = (val) => {
@@ -7923,7 +7933,7 @@ function initGame() {
    * @param {number} originPlayerIndex - Player who triggered the collapse
    */
   function collapsePartnerCards(collapsedCards, originPlayerIndex) {
-    const gameMode = window.currentGameMode || '4';
+    const gameMode = window.currentGameMode || '8';
     
     collapsedCards.forEach(({ finalValue, cardElement }) => {
       const mainValue = cardElement.dataset.mainValue;
