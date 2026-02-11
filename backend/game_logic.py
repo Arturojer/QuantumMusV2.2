@@ -663,7 +663,7 @@ class QuantumMusGame:
         }
         
         # Check if card is entangled and activate if so
-        if card.is_entangled:
+        if getattr(card, 'is_entangled', False):
             entanglement_data = self.entanglement.activate_entanglement(
                 card.value, card.suit, player_index
             )
@@ -685,7 +685,7 @@ class QuantumMusGame:
         entanglement_info = []
         
         for idx, card in enumerate(player_hand):
-            if card.is_entangled:
+            if getattr(card, 'is_entangled', False):
                 partner_card = self.entanglement.get_partner_card(card.value, card.suit)
                 partner_player = self.entanglement.get_partner_player(player_index, card.value, card.suit)
                 
@@ -722,7 +722,7 @@ class QuantumMusGame:
         entangled_cards = []
         
         for idx, card in enumerate(player_hand):
-            if card.is_entangled:
+            if getattr(card, 'is_entangled', False):
                 partner_info = self.entanglement.get_partner_card(card.value, card.suit)
                 if partner_info:
                     entangled_cards.append({
