@@ -57,6 +57,8 @@ class QuantumCard:
         return {
             'palo': self.palo,
             'valor': self.valor,
+            'value': self.valor,  # English compatibility
+            'suit': self.palo,     # English compatibility
             'card_id': self.card_id,
             'measured_state': self.measured_state,
             'repr': str(self)
@@ -200,6 +202,8 @@ class QuantumCard:
         return {
             'palo': self.palo,
             'valor': self.valor,
+            'value': self.valor,  # English compatibility
+            'suit': self.palo,     # English compatibility  
             'card_id': self.card_id,
             'measured_state': self.measured_state,
             'repr': str(self)

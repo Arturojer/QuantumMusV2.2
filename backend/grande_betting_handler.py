@@ -279,6 +279,7 @@ class GrandeBettingHandler:
         
         return {
             'success': True,
+            'round_ended': True,
             'grande_ended': True,
             'winner_team': winning_team,
             'points': 1,
@@ -323,6 +324,7 @@ class GrandeBettingHandler:
         
         return {
             'success': True,
+            'round_ended': True,
             'grande_ended': True,
             'bet_accepted': True,
             'bet_amount': phase['currentBetAmount'],
@@ -371,6 +373,7 @@ class GrandeBettingHandler:
         
         return {
             'success': True,
+            'round_ended': True,
             'grande_ended': True,
             'all_passed': True,
             'points_at_stake': 1,
