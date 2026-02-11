@@ -36,6 +36,7 @@ class GenericBettingHandler:
             'allPassed': True,  # Track if all players pass
             'result': None,  # Will store: {'winner': team, 'points': X, 'comparison': 'deferred'}
             'previousBetAmount': 0,  # Track bet amount before the current raise
+            'raiseCount': 0,  # Track number of raises (for rejection logic)
             'isFirstBet': True  # Track if this is the first bet (for 1pt rejection rule)
         }
 
@@ -232,7 +233,8 @@ class GenericBettingHandler:
 
         # Save current bet amount as previous (before this raise)
         phase['previousBetAmount'] = phase['currentBetAmount']
-        logger.info(f"Saving previous bet amount: {phase['currentBetAmount']}")
+        phase['raiseCount'] = phase.get('raiseCount', 0) + 1
+        logger.info(f"Saving previous bet amount: {phase['currentBetAmount']}, raise count: {phase['raiseCount']}")
 
         # Update bet
         phase['currentBetAmount'] = new_bet_amount
@@ -269,23 +271,30 @@ class GenericBettingHandler:
         Both defenders rejected the bet.
         Points awarded depend on the bet sequence:
         - First bet rejected (no raises): 1 point
-        - Bet raised, then rejected: award previous bet amount (before the last raise)
+        - One raise, then rejected: award original bet (before the raise)
+        - Two or more raises, then rejected: award cumulative total (current bet)
         Round phase ends.
         """
         phase = self.game.state[f'{self.round_type.lower()}Phase']
         phase['phaseState'] = 'RESOLVED'
+        
+        raise_count = phase.get('raiseCount', 0)
         
         # Determine points to award based on bet history
         if phase.get('isFirstBet', True):
             # First bet rejected with no raises: award 1 point
             points_awarded = 1
             logger.info(f"First bet rejected in {self.round_type} - awarding 1 point")
-        else:
-            # Bet was raised, then rejected: award the bet amount BEFORE the last raise
+        elif raise_count == 1:
+            # Single raise, then rejected: award the bet BEFORE the raise
             points_awarded = phase.get('previousBetAmount', 1)
             if points_awarded == 0:
                 points_awarded = 1  # Safety fallback
-            logger.info(f"Bet rejected after raise in {self.round_type} - awarding previous bet amount: {points_awarded}")
+            logger.info(f"Bet rejected after single raise in {self.round_type} - awarding previous bet amount: {points_awarded}")
+        else:
+            # Two or more raises, then rejected: award cumulative total
+            points_awarded = phase['currentBetAmount']
+            logger.info(f"Bet rejected after {raise_count} raises in {self.round_type} - awarding cumulative total: {points_awarded}")
         
         phase['result'] = {
             'winner': winning_team,
