@@ -883,7 +883,15 @@ function initGame() {
           gameState.teams.team1.score = st.teams.team1?.score ?? 0;
           gameState.teams.team2.score = st.teams.team2?.score ?? 0;
         }
+        
+        // Update currentBet from server state
         gameState.currentBet = st.currentBet || gameState.currentBet;
+        
+        // Log betting state for debugging
+        if (gameState.currentBet && gameState.currentBet.bettingTeam) {
+          console.log(`[ONLINE] Active bet detected: ${gameState.currentBet.betType} for ${gameState.currentBet.amount} by ${gameState.currentBet.bettingTeam}`);
+          console.log(`[ONLINE] Local player team: ${getPlayerTeam(0)}, Active player: ${gameState.activePlayerIndex + 1}`);
+        }
         
         // Show action notification for received actions
         if (data.action && typeof data.action.player_index !== 'undefined') {
@@ -5243,7 +5251,9 @@ function initGame() {
         
         // FORCE reset selection state to false for ALL cards at start of discard phase
         card.classList.add('selectable');
+        // Explicitly set as string 'false' and ensure it's not undefined/null
         card.dataset.selected = 'false';
+        card.setAttribute('data-selected', 'false');
         
         // Remove the default click handler that shows card details
         card.onclick = null;
@@ -5251,6 +5261,7 @@ function initGame() {
         // Add new click handler only for local player's cards
         if (i === 0) {
           card.onclick = (e) => {
+            e.preventDefault();
             e.stopPropagation();
             toggleCardSelection(card);
           };
@@ -5269,13 +5280,18 @@ function initGame() {
   
   // Toggle card selection for discard with visual feedback
   function toggleCardSelection(card) {
-    // Ensure dataset.selected has a defined value
-    const isSelected = String(card.dataset.selected) === 'true';
-    card.dataset.selected = isSelected ? 'false' : 'true';
+    // Ensure dataset.selected has a defined value - use getAttribute for safety
+    const currentValue = card.getAttribute('data-selected') || card.dataset.selected || 'false';
+    const isSelected = String(currentValue).trim() === 'true';
+    const newValue = isSelected ? 'false' : 'true';
+    
+    // Set using both methods to ensure it sticks
+    card.dataset.selected = newValue;
+    card.setAttribute('data-selected', newValue);
 
     // Debug log to help identify cards that don't visually update
     try {
-      console.log(`[TOGGLE SELECT] playerIndex=${card.dataset.playerIndex || 'unknown'} cardIndex=${card.dataset.cardIndex || 'unknown'} selected=${card.dataset.selected}`);
+      console.log(`[TOGGLE SELECT] playerIndex=${card.dataset.playerIndex || 'unknown'} cardIndex=${card.dataset.cardIndex || 'unknown'} was=${currentValue} now=${newValue}`);
     } catch (e) { /* ignore logging errors */ }
 
     if (isSelected) {
@@ -5349,7 +5365,10 @@ function initGame() {
       color: white !important;
     `;
     
-    discardBtn.onclick = () => {
+    discardBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      
       // Get the local player's index (in online mode, always 0; in offline mode, player 1)
       const localPlayerIdx = 0; // Local player is always rendered at position 0
       const playerZoneId = `#player${localPlayerIdx + 1}-zone`;
@@ -5357,8 +5376,12 @@ function initGame() {
       // Get selected cards from local player's zone
       const selectedCards = [];
       const cards = document.querySelectorAll(`${playerZoneId} .quantum-card`);
+      console.log(`[DISCARD BUTTON DEBUG] Found ${cards.length} cards in ${playerZoneId}`);
+      
       cards.forEach((card, index) => {
-        if (card.dataset.selected === 'true') {
+        const isSelected = String(card.dataset.selected).trim() === 'true';
+        console.log(`[DISCARD BUTTON DEBUG] Card ${index}: dataset.selected="${card.dataset.selected}" isSelected=${isSelected}`);
+        if (isSelected) {
           selectedCards.push(index);
         }
       });
@@ -5486,6 +5509,7 @@ function initGame() {
         remainingCards.forEach((card, idx) => {
           card.classList.remove('selectable');
           card.dataset.selected = 'false';
+          card.setAttribute('data-selected', 'false');
           card.style.transform = '';
           card.style.filter = '';
           card.onclick = null;
@@ -5702,6 +5726,7 @@ function initGame() {
     card.dataset.playerIndex = String(playerIndex);
     // Initialize selection state for discard phase
     card.dataset.selected = 'false';
+    card.setAttribute('data-selected', 'false');
     
     const rotation = (Math.random() - 0.5) * 6;
     // Rotar cartas de jugadores laterales (2 y 4 = índices 1 y 3)
