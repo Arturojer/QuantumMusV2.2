@@ -722,12 +722,10 @@ class QuantumMusGame:
                         'partner': partner_info,
                         'teammate_index': teammate
                     })
-        
-        return entangled_cards
     
     # ============ COLLAPSE METHODS ============
     
-     def trigger_collapse_on_declaration(self, player_index, declaration, round_name):
+    def trigger_collapse_on_declaration(self, player_index, declaration, round_name):
         """
         Trigger collapse when a player makes a declaration
         Returns collapse event data suitable for Socket.IO broadcast

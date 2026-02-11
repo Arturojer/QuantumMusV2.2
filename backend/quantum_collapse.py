@@ -150,14 +150,17 @@ class QuantumCollapseManager:
         # Check if prediction was correct
         has_what_predicted = self._check_hand_after_collapse(player_index, round_name)
         
+        # Penalty amount depends on round: JUEGO = -2, PARES = -1
+        penalty_amount = -2 if round_name == 'JUEGO' else -1
+        
         if declaration == 'tengo' and not has_what_predicted:
-            penalty_points = -1
-            event.penalties.append((player_index, -1, f"Predicción incorrecta en {round_name}"))
-            logger.info(f"Player {player_index} incurred -1 penalty for wrong {round_name} prediction")
+            penalty_points = penalty_amount
+            event.penalties.append((player_index, penalty_amount, f"Predicción incorrecta en {round_name}"))
+            logger.info(f"Player {player_index} incurred {penalty_amount} penalty for wrong {round_name} prediction")
         elif declaration == 'no_tengo' and has_what_predicted:
-            penalty_points = -1
-            event.penalties.append((player_index, -1, f"Predicción incorrecta en {round_name}"))
-            logger.info(f"Player {player_index} incurred -1 penalty for wrong {round_name} prediction")
+            penalty_points = penalty_amount
+            event.penalties.append((player_index, penalty_amount, f"Predicción incorrecta en {round_name}"))
+            logger.info(f"Player {player_index} incurred {penalty_amount} penalty for wrong {round_name} prediction")
         
         self.collapse_history.append(event)
         return event, penalty_points
