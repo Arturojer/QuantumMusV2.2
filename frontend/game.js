@@ -854,6 +854,9 @@ function initGame() {
           console.log(`[ONLINE] Round transition: ${previousRound} -> ${gameState.currentRound}`);
           gameState.roundActions = {}; // Reset actions whenever round changes
           
+          // Reset stale flags on any round transition
+          gameState._musBetPending = false;
+          
           // Special handling for MUS -> GRANDE transition
           if (previousRound === 'MUS' && gameState.currentRound === 'GRANDE') {
             console.log('[ONLINE] MUS -> GRANDE transition');
@@ -866,8 +869,9 @@ function initGame() {
               console.log(`[ONLINE] MUS cut by player ${gameState.musCutterIndex + 1} (${data.action.action})`);
             }
             
-            // If bet originated in MUS, set flag to preserve classical order
-            if (gameState.currentBet && gameState.currentBet.betType) {
+            // If bet originated in MUS, check server state for active bet
+            const serverBet = st.currentBet;
+            if (serverBet && serverBet.betType) {
               gameState._musBetPending = true;
               console.log('[ONLINE] Bet originated in MUS - preserving classical defender order');
             }
@@ -4784,30 +4788,67 @@ function initGame() {
   
   // Enable/disable buttons based on whose turn it is
   function updateButtonStates(isLocalPlayerTurn) {
-    const buttons = document.querySelectorAll('.scoreboard-controls .quantum-gate');
+    const musBtn = document.querySelector('.scoreboard-controls .quantum-gate:not(.m-gate):not(.i-gate):not(.accept-gate):not(.ordago-gate)');
+    const envidoBtn = document.querySelector('.quantum-gate.m-gate');
+    const pasoBtn = document.querySelector('.quantum-gate.i-gate');
+    const acceptBtn = document.querySelector('.quantum-gate.accept-gate');
+    const ordagoBtn = document.querySelector('.quantum-gate.ordago-gate');
     
     // During CONTEO phase, all buttons should be disabled
     if (gameState.currentRound === 'CONTEO') {
-      buttons.forEach(btn => {
-        btn.disabled = true;
-        btn.style.opacity = '0.5';
-        btn.style.cursor = 'not-allowed';
-        btn.style.pointerEvents = 'none';
+      [musBtn, envidoBtn, pasoBtn, acceptBtn, ordagoBtn].forEach(btn => {
+        if (btn) {
+          btn.disabled = true;
+          btn.style.opacity = '0.5';
+          btn.style.cursor = 'not-allowed';
+          btn.style.pointerEvents = 'none';
+          btn.style.display = 'none';
+        }
       });
       return;
     }
     
-    // Normal button state logic
-    buttons.forEach(btn => {
-      btn.disabled = !isLocalPlayerTurn;
-      if (isLocalPlayerTurn) {
-        btn.style.opacity = '1';
-        btn.style.cursor = 'pointer';
-        btn.style.pointerEvents = 'auto';
-      } else {
-        btn.style.opacity = '0.5';
-        btn.style.cursor = 'not-allowed';
-        btn.style.pointerEvents = 'none';
+    // Determine if there's an active bet and if local player is on defending team
+    const localPlayerTeam = getPlayerTeam(0); // Local player is always index 0
+    const hasActiveBet = gameState.currentBet && gameState.currentBet.bettingTeam && gameState.currentBet.amount > 0;
+    const isDefending = hasActiveBet && gameState.currentBet.bettingTeam !== localPlayerTeam;
+    const isBettingRound = ['GRANDE', 'CHICA', 'PARES', 'JUEGO'].includes(gameState.currentRound);
+    const isMus = gameState.currentRound === 'MUS';
+    
+    // --- Button visibility ---
+    
+    // MUS button: only in MUS round and PARES/JUEGO declaration phases
+    if (musBtn) {
+      musBtn.style.display = (isMus || gameState.currentRound === 'PARES' || gameState.currentRound === 'JUEGO') ? '' : 'none';
+    }
+    
+    // PASO button: always visible when playing
+    if (pasoBtn) pasoBtn.style.display = '';
+    
+    // ENVIDO button: visible in MUS and betting rounds
+    if (envidoBtn) envidoBtn.style.display = (isMus || isBettingRound) ? '' : 'none';
+    
+    // ORDAGO button: visible in MUS and betting rounds
+    if (ordagoBtn) ordagoBtn.style.display = (isMus || isBettingRound) ? '' : 'none';
+    
+    // ACCEPT button: only shown when there's an active bet AND local player is on the defending team AND it's their turn
+    if (acceptBtn) {
+      acceptBtn.style.display = (isBettingRound && hasActiveBet && isDefending && isLocalPlayerTurn) ? '' : 'none';
+    }
+    
+    // --- Enable/disable based on turn ---
+    [musBtn, envidoBtn, pasoBtn, acceptBtn, ordagoBtn].forEach(btn => {
+      if (btn && btn.style.display !== 'none') {
+        btn.disabled = !isLocalPlayerTurn;
+        if (isLocalPlayerTurn) {
+          btn.style.opacity = '1';
+          btn.style.cursor = 'pointer';
+          btn.style.pointerEvents = 'auto';
+        } else {
+          btn.style.opacity = '0.5';
+          btn.style.cursor = 'not-allowed';
+          btn.style.pointerEvents = 'none';
+        }
       }
     });
   }
