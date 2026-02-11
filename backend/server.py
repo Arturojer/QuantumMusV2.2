@@ -15,7 +15,7 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 import logging
 import os
 from datetime import datetime
-import random
+import random  # Only used for non-game room codes
 import time
 import threading
 
@@ -32,6 +32,7 @@ from game_manager import GameManager
 from room_manager import RoomManager
 from models import db, Game, Player, GameHistory
 from Logica_cuantica.baraja import QuantumDeck
+from Logica_cuantica.quantum_random import QuantumRNG
 from config import get_config
 
 # Configure
@@ -540,8 +541,9 @@ def handle_start_game(data):
     
     # Create game instance
     game = game_manager.create_game(room_id, room['players'], room['game_mode'])
-    # Server-authoritative mano for all clients
-    game.state['manoIndex'] = random.randrange(game.num_players)
+    # Server-authoritative mano for all clients - use quantum randomness
+    qrng = QuantumRNG()
+    game.state['manoIndex'] = qrng.random_int(0, game.num_players - 1)
     game.state['activePlayerIndex'] = game.state['manoIndex']
     
     # Deal initial cards

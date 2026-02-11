@@ -3,6 +3,7 @@ from typing import List, Tuple, Dict
 from qiskit import QuantumCircuit
 from qiskit_aer import AerSimulator
 from .cartas import QuantumCard
+from .quantum_random import QuantumRNG
 
 class QuantumDeck:
     """
@@ -45,6 +46,9 @@ class QuantumDeck:
         self.cards = self._create_deck()
         self.deck_index = 0
         self.simulator = AerSimulator()
+        
+        # Use quantum RNG for all random operations
+        self.qrng = QuantumRNG()
 
         self.enable_king_pit_entanglement = enable_king_pit_entanglement
         self.enable_two_three_entanglement = enable_two_three_entanglement
@@ -66,56 +70,16 @@ class QuantumDeck:
                 card_id += 1
         return cards
 
-    def _generate_quantum_random_bits(self, num_bits: int) -> List[int]:
-        """Generate random bits using quantum measurement"""
-        qc = QuantumCircuit(num_bits, num_bits)
-        # Apply Hadamard to all qubits to create superposition
-        for i in range(num_bits):
-            qc.h(i)
-        # Measure all qubits
-        qc.measure(range(num_bits), range(num_bits))
-        
-        # Execute circuit
-        job = self.simulator.run(qc, shots=1)
-        result = job.result()
-        counts = result.get_counts()
-        
-        # Get the measurement result (binary string)
-        bitstring = list(counts.keys())[0]
-        # Convert to list of ints (reverse to match qubit order)
-        return [int(b) for b in reversed(bitstring)]
-    
-    def _quantum_fisher_yates_shuffle(self, items: List) -> List:
-        """Shuffle using quantum random numbers with Fisher-Yates algorithm"""
-        n = len(items)
-        shuffled = items.copy()
-        
-        for i in range(n - 1, 0, -1):
-            # Calculate number of bits needed to represent i
-            bits_needed = i.bit_length()
-            
-            # Generate quantum random number in range [0, i]
-            while True:
-                random_bits = self._generate_quantum_random_bits(bits_needed)
-                # Convert bits to integer
-                j = sum(bit * (2 ** idx) for idx, bit in enumerate(random_bits))
-                if j <= i:
-                    break
-            
-            # Swap elements
-            shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
-        
-        return shuffled
-
     def shuffle(self, seed: int = None):
         """Shuffle deck using quantum randomness"""
         if seed is not None:
             # For testing/reproducibility, use classical numpy
+            # Note: This is only for testing - production should use quantum shuffle
             np.random.seed(seed)
             np.random.shuffle(self.cards)
         else:
-            # Use quantum shuffle
-            self.cards = self._quantum_fisher_yates_shuffle(self.cards)
+            # Use quantum shuffle from QuantumRNG
+            self.cards = self.qrng.shuffle(self.cards)
         self.deck_index = 0
 
     def draw(self, num_cards: int = 1) -> List[QuantumCard]:
@@ -167,7 +131,8 @@ class QuantumDeck:
         pito = self.PALO_CODE[palo] + self.VALOR_CODE[10]
 
         # Colapso: o se quedan como (Rey,Pito) o se "intercambian identidades"
-        if np.random.rand() < 0.5:
+        # Use quantum randomness instead of numpy
+        if self.qrng.random_float() < 0.5:
             pair = (rey, pito)
         else:
             pair = (pito, rey)
@@ -198,7 +163,8 @@ class QuantumDeck:
         tres = self.PALO_CODE[palo] + self.VALOR_CODE[3]
         dos = self.PALO_CODE[palo] + self.VALOR_CODE[2]
 
-        if np.random.rand() < 0.5:
+        # Use quantum randomness instead of numpy
+        if self.qrng.random_float() < 0.5:
             pair = (tres, dos)
         else:
             pair = (dos, tres)
