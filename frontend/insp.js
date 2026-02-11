@@ -2467,6 +2467,13 @@ function initGame() {
   
   // Show discard UI for all players
   function showDiscardUI() {
+    // Only initialize discard UI once per phase - don't reset if already in discard mode
+    const isAlreadyInDiscardMode = gameState.waitingForDiscard && document.getElementById('discard-button');
+    if (isAlreadyInDiscardMode) {
+      console.log('[SHOW DISCARD UI] Already in discard mode, skipping re-initialization');
+      return;
+    }
+    
     // For all players, allow card selection for discard
     for (let i = 0; i < 4; i++) {
       const playerId = `player${i + 1}`;
@@ -2476,7 +2483,10 @@ function initGame() {
         // Only make local player's cards selectable
         if (i === localPlayerIndex) {
           card.classList.add('selectable');
-          card.dataset.selected = 'false';
+          // Only initialize selection state if not already set
+          if (typeof card.dataset.selected === 'undefined') {
+            card.dataset.selected = 'false';
+          }
           card.style.cursor = 'pointer';
         }
       });
@@ -2564,20 +2574,23 @@ function initGame() {
         }
       });
 
-      // If no cards selected or less than one card selected, discard all cards
-      const cardsToDiscard = (selectedCards.length < 1) ? [0, 1, 2, 3] : selectedCards;
+      // Discard logic:
+      // - If cards are selected, discard only those
+      // - If no cards selected, discard all 4 cards
+      const cardsToDiscard = (selectedCards.length === 0) ? [0, 1, 2, 3] : selectedCards;
       
       console.log(`[DISCARD BUTTON] Selected ${selectedCards.length} cards, discarding:`, cardsToDiscard);
 
-      // Disable discard button
+      // Disable discard button to prevent double-clicks
       discardBtn.disabled = true;
       discardBtn.style.opacity = '0.5';
+      discardBtn.style.pointerEvents = 'none';
 
-      // Discard selected cards - keep them gray
+      // Discard selected cards
       handleDiscard(localPlayerIndex, cardsToDiscard);
 
       // Remove discard button
-      discardBtn.remove();
+      setTimeout(() => discardBtn.remove(), 100);
     };
     
     document.body.appendChild(discardBtn);
