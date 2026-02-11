@@ -272,6 +272,28 @@ class QuantumMusGame:
     
     def get_public_state(self):
         """Get public game state (without card details)"""
+        # Sync currentBet with the appropriate phase state
+        current_round = self.state['currentRound']
+        phase_key = f'{current_round.lower()}Phase'
+        
+        if current_round in ['GRANDE', 'CHICA', 'PARES', 'JUEGO'] and self.state.get(phase_key):
+            phase = self.state[phase_key]
+            # Update currentBet to reflect the phase state
+            if phase['phaseState'] in ['BET_PLACED', 'WAITING_RESPONSE']:
+                self.state['currentBet'] = {
+                    'amount': phase['currentBetAmount'],
+                    'bettingTeam': phase['attackingTeam'],
+                    'betType': phase['betType'],
+                    'responses': {}
+                }
+            elif phase['phaseState'] == 'NO_BET':
+                self.state['currentBet'] = {
+                    'amount': 0,
+                    'bettingTeam': None,
+                    'betType': None,
+                    'responses': {}
+                }
+        
         return {
             'room_id': self.room_id,
             'game_mode': self.game_mode,
