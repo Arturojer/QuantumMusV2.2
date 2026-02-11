@@ -379,9 +379,13 @@ class QuantumMusGame:
             return False  # Game continues
         else:
             # All rounds complete - resolve deferred comparisons and new hand
-            self._resolve_deferred_comparisons()
-            self.start_new_hand()
-            return True  # Hand ended
+            conteo_result = self._resolve_deferred_comparisons()
+            # Don't start new hand yet - let clients acknowledge CONTEO first
+            # New hand will be started when server receives acknowledgment
+            return {
+                'hand_ended': True,
+                'conteo_results': conteo_result
+            }
     
     def start_new_hand(self):
         """Start a new hand"""
@@ -432,6 +436,10 @@ class QuantumMusGame:
         logger.info("Resolving deferred comparisons for all phases...")
         result = self.calculate_final_scores()
         logger.info("All deferred comparisons resolved.")
+        
+        # Store CONTEO results in game state for broadcasting
+        self.state['conteoResults'] = result
+        
         return result
 
     def calculate_final_scores(self):
