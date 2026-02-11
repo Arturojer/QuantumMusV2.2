@@ -28,7 +28,7 @@ class RoomManager:
             if code not in self.room_codes:
                 return code
     
-    def create_room(self, name, game_mode='4', max_players=4):
+    def create_room(self, name, game_mode='8', max_players=4):
         """Create a new game room"""
         room_id = str(uuid.uuid4())[:8]
         room_code = self._generate_room_code()

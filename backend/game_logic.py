@@ -16,14 +16,14 @@ logger = logging.getLogger(__name__)
 class QuantumMusGame:
     """Main game class managing the Quantum Mus game state"""
     
-    def __init__(self, room_id, players, game_mode='4', teams=None):
+    def __init__(self, room_id, players, game_mode='8', teams=None):
         self.room_id = room_id
         self.players = players  # List of player dicts
         
         # Validate game_mode
         if game_mode not in ['4', '8']:
-            logger.warning(f"Invalid game_mode '{game_mode}', defaulting to '4'")
-            game_mode = '4'
+            logger.warning(f"Invalid game_mode '{game_mode}', defaulting to '8'")
+            game_mode = '8'
         self.game_mode = game_mode
         
         # Validate players (allow 1-4 players for demo mode and online modes)

@@ -49,6 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.success && data.room) {
           gameState.roomId = data.room.id;
           gameState.roomCode = data.room.code || data.room.id;
+          gameState.gameMode = data.room.game_mode || '8';
           document.getElementById('room-code-value').textContent = gameState.roomCode;
           socket.emit('join_room', {
             room_id: data.room.id,

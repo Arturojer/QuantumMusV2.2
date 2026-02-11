@@ -1053,7 +1053,8 @@ def handle_get_game_state(data):
     game = game_manager.get_game(room_id)
     if game:
         emit('game_state', {
-            'game_state': game.get_player_state(player_index)
+            'game_state': game.get_player_state(player_index),
+            'game_mode': game.game_mode
         })
     else:
         emit('game_error', {'error': 'Game not found'})

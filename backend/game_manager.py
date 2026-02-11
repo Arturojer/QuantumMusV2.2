@@ -14,7 +14,7 @@ class GameManager:
     def __init__(self):
         self.games = {}  # room_id -> QuantumMusGame
     
-    def create_game(self, room_id, players, game_mode='4', teams=None):
+    def create_game(self, room_id, players, game_mode='8', teams=None):
         """Create a new game instance"""
         if room_id in self.games:
             logger.warning(f"Game already exists for room {room_id}")

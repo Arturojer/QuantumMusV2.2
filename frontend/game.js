@@ -829,6 +829,11 @@ function initGame() {
       const gs = payload.game_state || {};
       const st = gs.state || gs;
       if (!st) return;
+      // Set game mode from payload if provided
+      if (payload.game_mode) {
+        window.currentGameMode = payload.game_mode;
+        console.log('[applyServerSnapshot] Game mode set:', payload.game_mode);
+      }
       gameState.currentRound = st.currentRound || gameState.currentRound;
       gameState.musPhaseActive = gameState.currentRound === 'MUS';
       if (typeof st.manoIndex !== 'undefined') {
@@ -850,9 +855,9 @@ function initGame() {
           applyEntanglementGlows(data.game_state);
         }
       if (payload.game_state && payload.game_state.player_hands) {
-        renderHandsFromServer(payload.game_state.player_hands, payload.game_mode || window.currentGameMode || (window.onlineMode ? '8' : '4'));
+        renderHandsFromServer(payload.game_state.player_hands, payload.game_mode || window.currentGameMode || '8');
       } else if (payload.player_hands) {
-        renderHandsFromServer(payload.player_hands, payload.game_mode || window.currentGameMode || (window.onlineMode ? '8' : '4'));
+        renderHandsFromServer(payload.player_hands, payload.game_mode || window.currentGameMode || '8');
       }
       updateManoIndicators();
       updateRoundDisplay();
@@ -865,6 +870,11 @@ function initGame() {
         console.log('DEBUG FRONTEND: Mi mano es:', data.game_state.my_hand);
       } else {
         console.error('DEBUG FRONTEND: ¡No encuentro my_hand en los datos!');
+      }
+      // Set game mode from server data
+      if (data.game_mode) {
+        window.currentGameMode = data.game_mode;
+        console.log('[ONLINE] Game mode set from initial game_state:', data.game_mode);
       }
       // Fix: Always show hand for local player, even if my_hand is missing
       const handContainer = document.querySelector('#player1-zone .cards-row');
@@ -1091,6 +1101,11 @@ function initGame() {
         console.error('DEBUG FRONTEND: ¡No encuentro my_hand en los datos!');
       }
       try {
+        // Set game mode from server data
+        if (data.game_mode) {
+          window.currentGameMode = data.game_mode;
+          console.log('[ONLINE] Game mode set from server:', data.game_mode);
+        }
         if (timerInterval) { clearTimeout(timerInterval); timerInterval = null; }
         if (aiDecisionTimeout) { clearTimeout(aiDecisionTimeout); aiDecisionTimeout = null; }
         applyServerSnapshot(data || {});
