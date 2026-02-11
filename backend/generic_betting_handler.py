@@ -34,7 +34,10 @@ class GenericBettingHandler:
             'lastBettingTeam': None,
             'defendersResponded': [],  # List of defender player indices who responded
             'allPassed': True,  # Track if all players pass
-            'result': None  # Will store: {'winner': team, 'points': X, 'comparison': 'deferred'}
+            'result': None,  # Will store: {'winner': team, 'points': X, 'comparison': 'deferred'}
+            'previousBetAmount': 0,  # Track bet amount before the current raise
+            'raiseCount': 0,  # Track number of raises (for rejection logic)
+            'isFirstBet': True  # Track if this is the first bet (for 1pt rejection rule)
         }
 
         # Active player is Mano
@@ -134,6 +137,7 @@ class GenericBettingHandler:
         phase['betType'] = bet_type
         phase['lastBettingTeam'] = betting_team
         phase['defendersResponded'] = []
+        phase['isFirstBet'] = False  # No longer the first bet
 
         logger.info(f"Player {player_index} ({betting_team}) placed {bet_type} bet: {bet_amount} points")
 
@@ -227,6 +231,11 @@ class GenericBettingHandler:
         """
         phase = self.game.state[f'{self.round_type.lower()}Phase']
 
+        # Save current bet amount as previous (before this raise)
+        phase['previousBetAmount'] = phase['currentBetAmount']
+        phase['raiseCount'] = phase.get('raiseCount', 0) + 1
+        logger.info(f"Saving previous bet amount: {phase['currentBetAmount']}, raise count: {phase['raiseCount']}")
+
         # Update bet
         phase['currentBetAmount'] = new_bet_amount
         phase['betType'] = 'ordago' if is_ordago else 'envido'
@@ -260,28 +269,50 @@ class GenericBettingHandler:
     def _resolve_rejection(self, winning_team):
         """
         Both defenders rejected the bet.
-        Attacking/betting team wins 1 point.
+        Points awarded depend on the bet sequence:
+        - First bet rejected (no raises): 1 point
+        - One raise, then rejected: award original bet (before the raise)
+        - Two or more raises, then rejected: award cumulative total (current bet)
         Round phase ends.
         """
         phase = self.game.state[f'{self.round_type.lower()}Phase']
         phase['phaseState'] = 'RESOLVED'
+        
+        raise_count = phase.get('raiseCount', 0)
+        
+        # Determine points to award based on bet history
+        if phase.get('isFirstBet', True):
+            # First bet rejected with no raises: award 1 point
+            points_awarded = 1
+            logger.info(f"First bet rejected in {self.round_type} - awarding 1 point")
+        elif raise_count == 1:
+            # Single raise, then rejected: award the bet BEFORE the raise
+            points_awarded = phase.get('previousBetAmount', 1)
+            if points_awarded == 0:
+                points_awarded = 1  # Safety fallback
+            logger.info(f"Bet rejected after single raise in {self.round_type} - awarding previous bet amount: {points_awarded}")
+        else:
+            # Two or more raises, then rejected: award cumulative total
+            points_awarded = phase['currentBetAmount']
+            logger.info(f"Bet rejected after {raise_count} raises in {self.round_type} - awarding cumulative total: {points_awarded}")
+        
         phase['result'] = {
             'winner': winning_team,
-            'points': 1,
+            'points': points_awarded,
             'reason': 'rejection',
             'comparison': None
         }
 
-        # Award point immediately
-        self.game.state['teams'][winning_team]['score'] += 1
+        # Award points immediately
+        self.game.state['teams'][winning_team]['score'] += points_awarded
 
-        logger.info(f"{winning_team} wins 1 point (both defenders rejected)")
+        logger.info(f"{winning_team} wins {points_awarded} points (both defenders rejected)")
 
         return {
             'success': True,
             'round_ended': True,
             'winner_team': winning_team,
-            'points': 1,
+            'points': points_awarded,
             'reason': 'Both defenders rejected',
             'move_to_next_round': True
         }
@@ -289,38 +320,132 @@ class GenericBettingHandler:
     def _resolve_acceptance(self):
         """
         A defender accepted the bet.
-        Round phase ends, but hand comparison is DEFERRED until after all 4 phases.
+        - If ordago (40 points): Game ends immediately, cards collapse, winner determined
+        - If normal bet: Round phase ends, hand comparison is DEFERRED until after all 4 phases.
         """
         phase = self.game.state[f'{self.round_type.lower()}Phase']
         phase['phaseState'] = 'RESOLVED'
 
-        # Store the bet for later comparison
-        phase['result'] = {
-            'attackingTeam': phase['attackingTeam'],
-            'defendingTeam': phase['defendingTeam'],
-            'betAmount': phase['currentBetAmount'],
-            'betType': phase['betType'],
-            'comparison': 'deferred',
-            'resolved': False
-        }
+        # Check if this is an ordago (all-in bet)
+        is_ordago = phase['betType'] == 'ordago'
+        
+        if is_ordago:
+            # ORDAGO: Immediate resolution - game ends now
+            # Get best cards from each team for this round
+            from card_deck import get_highest_card, get_lowest_card, compare_cards
+            
+            team1_cards = []
+            team2_cards = []
+            
+            for player_idx, hand in self.game.hands.items():
+                if player_idx in self.game.state['teams']['team1']['players']:
+                    team1_cards.extend([card.to_dict() for card in hand])
+                else:
+                    team2_cards.extend([card.to_dict() for card in hand])
+            
+            winner_team = None
+            
+            if self.round_type == 'GRANDE':
+                # Higher cards win
+                team1_best = get_highest_card(team1_cards, self.game.game_mode)
+                team2_best = get_highest_card(team2_cards, self.game.game_mode)
+                
+                # Default to 'A' (Ace) if no cards found - shouldn't happen in normal gameplay
+                result = compare_cards(
+                    team1_best['value'] if team1_best else 'A',
+                    team2_best['value'] if team2_best else 'A',
+                    self.game.game_mode
+                )
+                
+                # Ties go to team1 for GRANDE ordago resolution
+                # (In normal deferred resolution, ties go to Mano's team)
+                winner_team = 'team1' if result >= 0 else 'team2'
+                
+            elif self.round_type == 'CHICA':
+                # Lower cards win
+                team1_best = get_lowest_card(team1_cards, self.game.game_mode)
+                team2_best = get_lowest_card(team2_cards, self.game.game_mode)
+                
+                # Default to 'K' (King - highest card) for CHICA fallback
+                # In CHICA, lower is better, so defaulting to highest card (worst possible)
+                result = compare_cards(
+                    team1_best['value'] if team1_best else 'K',
+                    team2_best['value'] if team2_best else 'K',
+                    self.game.game_mode,
+                    lower_wins=True
+                )
+                
+                # Ties go to team1 for CHICA ordago resolution
+                winner_team = 'team1' if result >= 0 else 'team2'
+                
+            elif self.round_type == 'PARES':
+                # Pairs scoring
+                winner_team = self._compare_pares_hands()
+                
+            elif self.round_type == 'JUEGO':
+                # Points scoring (31+)
+                winner_team = self._compare_juego_hands()
+            
+            # Award 40 points immediately (ordago value)
+            self.game.state['teams'][winner_team]['score'] += 40
+            
+            phase['result'] = {
+                'winner': winner_team,
+                'points': 40,
+                'betType': 'ordago',
+                'comparison': 'immediate',
+                'resolved': True
+            }
+            
+            logger.info(f"ORDAGO accepted in {self.round_type}! {winner_team} wins 40 points immediately. Game over!")
+            
+            # Get card information for display
+            card_info = self._get_round_card_info()
+            
+            return {
+                'success': True,
+                'round_ended': True,
+                'bet_accepted': True,
+                'bet_amount': 40,
+                'bet_type': 'ordago',
+                'attacking_team': phase['attackingTeam'],
+                'defending_team': phase['defendingTeam'],
+                'reveal_cards': True,
+                'collapse_all_cards': True,
+                'card_info': card_info,
+                'winner_team': winner_team,
+                'points': 40,
+                'game_ended': True,  # Signal that game is over
+                'comparison_immediate': True
+            }
+        else:
+            # Normal bet: Store the bet for later comparison (deferred)
+            phase['result'] = {
+                'attackingTeam': phase['attackingTeam'],
+                'defendingTeam': phase['defendingTeam'],
+                'betAmount': phase['currentBetAmount'],
+                'betType': phase['betType'],
+                'comparison': 'deferred',
+                'resolved': False
+            }
 
-        # Get card information for revelation (without determining winner yet)
-        card_info = self._get_round_card_info()
+            # Get card information for revelation (without determining winner yet)
+            card_info = self._get_round_card_info()
 
-        logger.info(f"Bet accepted. {phase['currentBetAmount']} points at stake. Comparison deferred.")
+            logger.info(f"Bet accepted. {phase['currentBetAmount']} points at stake. Comparison deferred.")
 
-        return {
-            'success': True,
-            'round_ended': True,
-            'bet_accepted': True,
-            'bet_amount': phase['currentBetAmount'],
-            'attacking_team': phase['attackingTeam'],
-            'defending_team': phase['defendingTeam'],
-            'comparison_deferred': True,
-            'move_to_next_round': True,
-            'reveal_cards': True,
-            'card_info': card_info
-        }
+            return {
+                'success': True,
+                'round_ended': True,
+                'bet_accepted': True,
+                'bet_amount': phase['currentBetAmount'],
+                'attacking_team': phase['attackingTeam'],
+                'defending_team': phase['defendingTeam'],
+                'comparison_deferred': True,
+                'move_to_next_round': True,
+                'reveal_cards': True,
+                'card_info': card_info
+            }
 
     def _resolve_all_pass(self):
         """

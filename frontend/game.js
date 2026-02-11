@@ -252,7 +252,9 @@ function resetRoundState() {
     amount: 0,
     bettingTeam: null,
     betType: null,
-    responses: {}
+    responses: {},
+    raiseCount: 0,
+    previousAmount: 0
   };
   gameState.allPlayersPassed = false;
 
@@ -849,6 +851,31 @@ function initGame() {
         const previousRound = gameState.currentRound;
         gameState.currentRound = st.currentRound || gameState.currentRound;
         
+        // Check if this is an ordago game ending (immediate resolution)
+        if (data.result && data.result.game_ended && data.result.bet_type === 'ordago') {
+          console.log('[ONLINE] ORDAGO accepted - game ending immediately!');
+          
+          // Update scores
+          if (st.teams) {
+            gameState.teams.team1.score = st.teams.team1?.score ?? 0;
+            gameState.teams.team2.score = st.teams.team2?.score ?? 0;
+          }
+          
+          // Collapse and reveal all cards
+          collapseAllRemaining().then(() => {
+            revealAllCards(true);
+            
+            // Show game over with ordago winner (showGameOver will freeze state)
+            setTimeout(() => {
+              const winnerTeam = data.result.winner_team; // Already in 'team1' or 'team2' format
+              showGameOver(winnerTeam);
+            }, 2000);
+          });
+          
+          // Don't process further updates - game is over
+          return;
+        }
+        
         // Detect round transitions and reset state accordingly
         if (previousRound !== gameState.currentRound) {
           console.log(`[ONLINE] Round transition: ${previousRound} -> ${gameState.currentRound}`);
@@ -895,6 +922,11 @@ function initGame() {
         if (gameState.currentBet && gameState.currentBet.bettingTeam) {
           console.log(`[ONLINE] Active bet detected: ${gameState.currentBet.betType} for ${gameState.currentBet.amount} by ${gameState.currentBet.bettingTeam}`);
           console.log(`[ONLINE] Local player team: ${getPlayerTeam(0)}, Active player: ${gameState.activePlayerIndex + 1}`);
+          
+          // If ordago bet, log button visibility intent
+          if (gameState.currentBet.betType === 'ordago') {
+            console.log('[ONLINE] ORDAGO bet detected - envido button will be hidden');
+          }
         }
         
         // Show action notification for received actions
@@ -1020,10 +1052,122 @@ function initGame() {
       }
     });
     socket.on('game_ended', (data) => {
-      if (data.winner && typeof window.showGameOver === 'function') {
-        const winnerTeam = data.winner === 'team1' ? 1 : 2;
-        const fs = data.final_scores || {};
-        window.showGameOver(winnerTeam, { team1: fs.team1 || 0, team2: fs.team2 || 0 }, { rounds: 0 });
+      console.log('[ONLINE] Game ended event received:', data);
+      freezeGameState();
+      if (data.winner) {
+        const winnerTeam = data.winner; // Already in 'team1' or 'team2' format
+        setTimeout(() => showGameOver(winnerTeam), 1000);
+      }
+    });
+    socket.on('declaration_made', (data) => {
+      try {
+        const localIdx = serverToLocal(data.player_index);
+        const roundName = data.round_name;  // 'PARES' or 'JUEGO'
+        const declaration = data.declaration;
+        
+        console.log(`[ONLINE] Player ${localIdx + 1} declared '${declaration}' in ${roundName}`);
+        
+        // Store declaration locally
+        const key = roundName === 'PARES' ? 'paresDeclarations' : 'juegoDeclarations';
+        if (!gameState[key]) gameState[key] = {};
+        gameState[key][localIdx] = declaration;
+        
+        // Show notification
+        const notificationType = declaration === true ? (roundName === 'PARES' ? 'pares' : 'juego') : 
+                                declaration === false ? (roundName === 'PARES' ? 'no_pares' : 'no_juego') : 
+                                (roundName === 'PARES' ? 'puede_pares' : 'puede_juego');
+        showActionNotification(localIdx, notificationType);
+        
+        // If server provided next_player (for 'puede' declarations), update active player
+        if (data.next_player !== null && data.next_player !== undefined) {
+          const nextLocalIdx = serverToLocal(data.next_player);
+          gameState.activePlayerIndex = nextLocalIdx;
+          startPlayerTurnTimer(nextLocalIdx);
+          
+          // Continue with declaration round if not all declared yet
+          if (Object.keys(gameState[key]).length < 4) {
+            proceedWithParesDeclaration();
+          }
+        }
+        
+        // If this was a 'puede' declaration, no collapse happens yet
+        // For 'tengo' or 'no tengo', wait for 'cards_collapsed' event
+      } catch (e) {
+        console.warn('[socket:declaration_made] handler failed', e);
+      }
+    });
+    socket.on('cards_collapsed', (data) => {
+      try {
+        const localIdx = serverToLocal(data.player_index);
+        const roundName = data.round_name;
+        const declaration = data.declaration;
+        const penalty = data.penalty;
+        
+        console.log(`[ONLINE] Cards collapsed for player ${localIdx + 1} in ${roundName}, penalty:`, penalty);
+        
+        // Update hands from server
+        if (data.updated_hands) {
+          Object.keys(data.updated_hands).forEach(serverIdx => {
+            const localPlayerIdx = serverToLocal(parseInt(serverIdx));
+            const hand = data.updated_hands[serverIdx];
+            
+            // Update cards in UI
+            const playerZone = document.getElementById(`player${localPlayerIdx + 1}-zone`);
+            if (playerZone) {
+              const cardsRow = playerZone.querySelector('.cards-row');
+              const cards = cardsRow.querySelectorAll('.quantum-card');
+              
+              hand.forEach((cardData, cardIdx) => {
+                if (cards[cardIdx]) {
+                  // Update card value display
+                  const cardTop = cards[cardIdx].querySelector('.card-top');
+                  const decoration = cards[cardIdx].querySelector('.quantum-decoration');
+                  if (cardTop && decoration) {
+                    const mappedCard = mapBackendCardToFrontend(cardData);
+                    decoration.textContent = mappedCard.value;
+                    // Mark as collapsed
+                    cards[cardIdx].dataset.collapsed = 'true';
+                  }
+                }
+              });
+            }
+          });
+        }
+        
+        // Apply penalty if any
+        if (penalty) {
+          showPenaltyNotification(localIdx, penalty);
+          
+          // Show team point award if points were deducted
+          if (penalty.penalized && penalty.points_deducted) {
+            const playerTeam = gameState.teams.team1.players.includes(localIdx) ? 'team1' : 'team2';
+            const opponentTeam = playerTeam === 'team1' ? 'team2' : 'team1';
+            // Award goes to opponent team
+            showTeamPointAward(opponentTeam, penalty.points_deducted, 'penalty');
+          }
+          
+          // Update declaration with penalty marker
+          const key = roundName === 'PARES' ? 'paresDeclarations' : 'juegoDeclarations';
+          if (penalty.penalized) {
+            // Mark as penalized but still eligible for betting
+            // If declared tengo (true) but was wrong, mark as 'tengo_after_penalty'
+            // If declared no tengo (false) but was wrong, mark as 'no_tengo'
+            if (declaration === true || declaration === 'tengo') {
+              gameState[key][localIdx] = 'tengo_after_penalty';
+            } else {
+              gameState[key][localIdx] = 'no_tengo';
+            }
+          }
+        }
+        
+        // Clear waiting flag and advance to next player
+        if (window._waitingServerDeclaration && window._waitingServerDeclaration.playerIndex === localIdx) {
+          window._waitingServerDeclaration = null;
+          nextPlayer();
+          startPlayerTurnTimer(gameState.activePlayerIndex);
+        }
+      } catch (e) {
+        console.warn('[socket:cards_collapsed] handler failed', e);
       }
     });
     socket.on('cards_discarded', (data) => {
@@ -2029,23 +2173,36 @@ function initGame() {
         
         if (allDefendersPassed) {
           // Both defenders passed - bet rejected
-          // PUNTO: 2 points, GRANDE/CHICA/PARES/JUEGO: 1 point or previous bet amount
+          // TODO: Fix cumulative rejection point calculation
+          // Current bug: Only awards previousAmount for single raise, not cumulative total
+          // Should track raiseCount and:
+          // - First bet rejected (no raises): 1 point
+          // - Single raise rejected: award previousAmount (amount before last raise)
+          // - Multiple raises rejected: award cumulative total (currentBet.amount)
+          // Backend already implements this correctly, but frontend needs sync
           let points;
           if (gameState.currentRound === 'PUNTO') {
             points = 2; // PUNTO rejection always gives 2 points
           } else {
-            points = gameState.currentBet.isRaise ? gameState.currentBet.previousAmount : 1;
+            // TEMPORARY FIX: Use backend logic when available via socket
+            // For now, use current logic but this is INCORRECT for multiple raises
+            const raiseCount = gameState.currentBet.raiseCount || 0;
+            if (raiseCount === 0) {
+              points = 1; // First bet, no raises
+            } else if (raiseCount === 1) {
+              points = gameState.currentBet.previousAmount || gameState.currentBet.amount;
+            } else {
+              points = gameState.currentBet.amount; // Multiple raises - cumulative
+            }
           }
           gameState.teams[gameState.currentBet.bettingTeam].score += points;
           console.log(`Team ${gameState.currentBet.bettingTeam} wins ${points} points (bet rejected in ${gameState.currentRound})`);
-          showTeamPointsNotification(gameState.currentBet.bettingTeam, points);
+          showTeamPointAward(gameState.currentBet.bettingTeam, points, 'rechazado');
           updateScoreboard();
           
-          // Check for game over
+          // Check for game over (updateScoreboard will handle the check and call showGameOver)
           if (gameState.teams[gameState.currentBet.bettingTeam].score >= 40) {
-            freezeGameState();
-            showGameOver(gameState.currentBet.bettingTeam);
-            return;
+            return; // updateScoreboard already triggered game over
           }
           
           // Move to next round after bet rejection (applies to both regular bets and ORDAGO)
@@ -2152,15 +2309,14 @@ function initGame() {
       if (gameState.currentBet.betType === 'ordago') {
         // ORDAGO accepted - collapse all remaining cards, determine winner, end game
         console.log(`[ORDAGO ACCEPT] Player ${playerIndex + 1} accepted ORDAGO - collapsing all cards`);
-        freezeGameState();
         // Collapse all remaining cards and wait for animations to finish
           collapseAllRemaining().then(() => {
             revealAllCards(true);
           setTimeout(() => {
             const roundWinner = calculateRoundWinner();
             console.log(`[ORDAGO] ${roundWinner} wins ${gameState.currentRound} round - game over!`);
-            // Set winning team's score to 40+ to trigger victory
-            gameState.teams[roundWinner].score = 40;
+            // Award 40 points and show game over (which will freeze state)
+            gameState.teams[roundWinner].score += 40;
             showGameOver(roundWinner);
           }, 2000);
         });
@@ -2211,6 +2367,7 @@ function initGame() {
       gameState.currentBet.bettingTeam = playerTeam;
       gameState.currentBet.betType = 'envido';
       gameState.currentBet.isRaise = isRaise;
+      gameState.currentBet.raiseCount = (gameState.currentBet.raiseCount || 0) + (isRaise ? 1 : 0);
       gameState.currentBet.responses = {};
 
       // Mark that a bet was placed this round (used later at CONTEO to decide 1pt)
@@ -2272,6 +2429,7 @@ function initGame() {
       gameState.currentBet.bettingTeam = playerTeam;
       gameState.currentBet.betType = 'ordago';
       gameState.currentBet.responses = {};
+      gameState.currentBet.raiseCount = gameState.currentBet.raiseCount || 0; // Preserve if raised to ordago
       
       // Turn goes to defending team, starting with closest to mano
       const manoTeam = getPlayerTeam(gameState.manoIndex);
@@ -2773,10 +2931,15 @@ function initGame() {
       if (canAutoDeclarePares) {
         // Will auto-declare after a 2s delay to match declaration pacing
         const autoResult = getAutoParesDeclaration(gameState.activePlayerIndex);
+        const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
         setTimeout(() => {
           handleParesDeclaration(gameState.activePlayerIndex, autoResult, true);
-          nextPlayer();
-          proceedWithParesDeclaration();
+          // For local mode, advance turn here
+          // For online mode, let server handle turn advancement
+          if (!isOnlineGame) {
+            nextPlayer();
+            proceedWithParesDeclaration();
+          }
         }, 2000);
       } else {
         // Player needs to manually declare
@@ -2901,6 +3064,36 @@ function initGame() {
     return null;
   }
   
+  // Make a declaration in online mode (sends to server)
+  function makeDeclaration(playerIndex, declaration, roundName) {
+    if (!window.onlineMode || !window.QuantumMusSocket || !window.QuantumMusOnlineRoom) {
+      console.warn('[makeDeclaration] Not in online mode, ignoring');
+      return;
+    }
+    
+    const serverIdx = localToServer(playerIndex);
+    console.log(`[makeDeclaration] Player ${playerIndex + 1} (server ${serverIdx}) declaring '${declaration}' in ${roundName}`);
+    
+    // First, send the declaration to store it
+    window.QuantumMusSocket.emit('player_declaration', {
+      room_id: window.QuantumMusOnlineRoom,
+      player_index: serverIdx,
+      declaration: declaration === 'tengo' ? true : declaration === 'no_tengo' ? false : 'puede',
+      round_name: roundName
+    });
+    
+    // If tengo or no_tengo, trigger collapse (wait for server response to advance turn)
+    if (declaration === 'tengo' || declaration === 'no_tengo') {
+      window.QuantumMusSocket.emit('trigger_declaration_collapse', {
+        room_id: window.QuantumMusOnlineRoom,
+        player_index: serverIdx,
+        declaration: declaration,
+        round_name: roundName
+      });
+    }
+    // For 'puede', no collapse happens - turn advancement will be handled by proceedWithParesDeclaration
+  }
+  
   function handleParesDeclaration(playerIndex, declaration, isAutoDeclared = false) {
     // declaration can be: true (tengo), false (no tengo), or 'puede'
     gameState.paresDeclarations[playerIndex] = declaration;
@@ -2910,42 +3103,67 @@ function initGame() {
                             declaration === false ? 'no_pares' : 'puede_pares';
     showActionNotification(playerIndex, notificationType);
     
-    // If this was a manual declaration, stop this player's timer and (if local) pass turn immediately
+    // Check if we're in online mode
+    const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
+    
+    // If auto-declared, disable buttons to prevent player interaction
+    if (isAutoDeclared) {
+      const buttons = document.querySelectorAll('.scoreboard-controls .quantum-gate');
+      buttons.forEach(btn => btn.disabled = true);
+    }
+    
+    // If this was a manual declaration, stop this player's timer
     if (!isAutoDeclared) {
       if (timerInterval) {
         clearTimeout(timerInterval);
         timerInterval = null;
       }
       hideTimerBar(playerIndex);
-      const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
-      if (isOnlineGame) {
-        // Online: wait for server to perform collapse and broadcast; don't change activePlayerIndex locally
-        try { window._waitingServerDeclaration = { playerIndex, roundName: 'PARES', ts: Date.now() }; } catch (e) {}
+      
+      // For online mode, send declaration to server
+      if (isOnlineGame && typeof makeDeclaration === 'function') {
+        const declStr = declaration === true ? 'tengo' : declaration === false ? 'no_tengo' : 'puede';
+        try { 
+          makeDeclaration(playerIndex, declStr, 'PARES');
+          // For tengo/no_tengo, wait for server collapse response before advancing
+          // For puede, server will send next_player in declaration_made event
+          if (declaration !== 'puede') {
+            window._waitingServerDeclaration = { playerIndex, roundName: 'PARES', ts: Date.now() };
+          }
+        } catch (e) { 
+          console.error('[handleParesDeclaration] Error calling makeDeclaration:', e);
+        }
       } else {
-        // Local mode: advance immediately
+        // Local mode: collapse and advance
+        if (declaration === true || declaration === false) {
+          collapseOnDeclaration(playerIndex, 'PARES', declaration);
+        }
         nextPlayer();
         startPlayerTurnTimer(gameState.activePlayerIndex);
       }
-    }
-
-    // Collapse cards if declaration is manual and TENGO or NO TENGO (with animation)
-    if (!isAutoDeclared && (declaration === true || declaration === false)) {
-      console.log(`[PARES DECLARATION] Player ${playerIndex + 1} declared ${declaration ? 'TENGO' : 'NO TENGO'} - collapsing cards`);
-      // If online, ask server to perform collapse so all clients see same result
-      const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
+    } else {
+      // Auto-declared - for online mode, still need to send to server
       if (isOnlineGame && typeof makeDeclaration === 'function') {
-        const declStr = declaration === true ? 'tengo' : 'no_tengo';
-        try { makeDeclaration(playerIndex, declStr, 'PARES'); } catch (e) { /* ignore */ }
+        const declStr = declaration === true ? 'tengo' : declaration === false ? 'no_tengo' : 'puede';
+        try { 
+          makeDeclaration(playerIndex, declStr, 'PARES');
+          // Server will handle turn advancement via socket events
+        } catch (e) { 
+          console.error('[handleParesDeclaration] Error calling makeDeclaration:', e);
+        }
       } else {
-        collapseOnDeclaration(playerIndex, 'PARES', declaration);
+        // Local mode
+        if (declaration === true || declaration === false) {
+          collapseOnDeclaration(playerIndex, 'PARES', declaration);
+        }
       }
     }
     
     // Check if all players declared
     if (Object.keys(gameState.paresDeclarations).length < 4) {
       // Still need more declarations - move to next player
-      if (!isAutoDeclared) {
-        // We already advanced the turn immediately for manual declarations
+      if (!isAutoDeclared && !isOnlineGame) {
+        // Local mode only - online mode handles turn advancement via socket events or above
         proceedWithParesDeclaration();
       }
       return;
@@ -3696,15 +3914,9 @@ function initGame() {
       // Update scoreboard with final scores
       updateScoreboard();
 
-      // Check if any team reached winning score
-      if (gameState.teams.team1.score >= 40) {
-        freezeGameState(); // Stop all timers and interactions
-        showGameOver('team1');
-        return;
-      } else if (gameState.teams.team2.score >= 40) {
-        freezeGameState(); // Stop all timers and interactions
-        showGameOver('team2');
-        return;
+      // Check if any team reached winning score (updateScoreboard will handle showing game over)
+      if (gameState.teams.team1.score >= 40 || gameState.teams.team2.score >= 40) {
+        return; // Game is over, updateScoreboard handled it
       }
 
       // Reset pending points for next hand
@@ -4356,8 +4568,12 @@ function initGame() {
   }
 
   // Show game over panel with winner
+  // Show game over panel with winner
   function showGameOver(winningTeam) {
-    console.log(`Game Over! Winner: ${winningTeam}`);
+    console.log(`[GAME OVER] Winner: ${winningTeam}`);
+    
+    // Ensure game is frozen first
+    freezeGameState();
     
     const team1Score = gameState.teams.team1.score;
     const team2Score = gameState.teams.team2.score;
@@ -4462,6 +4678,9 @@ function initGame() {
       }
     });
   }
+  
+  // Make showGameOver available globally for online mode
+  window.showGameOver = showGameOver;
   
   // Update scoreboard with current round
   function updateRoundDisplay() {
@@ -5420,19 +5639,25 @@ function initGame() {
       console.log(`[DISCARD BUTTON DEBUG] Found ${cards.length} cards in ${playerZoneId}`);
       
       cards.forEach((card, index) => {
-        const isSelected = String(card.dataset.selected).trim() === 'true';
-        console.log(`[DISCARD BUTTON DEBUG] Card ${index}: dataset.selected="${card.dataset.selected}" isSelected=${isSelected}`);
+        // Read both getAttribute and dataset to be safe
+        const datasetValue = card.dataset.selected;
+        const attrValue = card.getAttribute('data-selected');
+        const isSelected = String(datasetValue || attrValue || 'false').trim() === 'true';
+        console.log(`[DISCARD BUTTON DEBUG] Card ${index}: dataset="${datasetValue}" attr="${attrValue}" isSelected=${isSelected}`);
         if (isSelected) {
           selectedCards.push(index);
         }
       });
       
-      // Discard logic: 
-      // - If cards are selected, discard only those
-      // - If no cards selected, discard all 4 cards
-      const cardsToDiscard = (selectedCards.length === 0) ? [0, 1, 2, 3] : selectedCards;
+      // Require at least one card to be selected (don't auto-discard all if none selected)
+      if (selectedCards.length === 0) {
+        console.warn('[DISCARD BUTTON] No cards selected - user must select at least one card');
+        // Show error message
+        showTemporaryMessage('Selecciona al menos una carta para descartar', 2000);
+        return;
+      }
       
-      console.log(`[DISCARD BUTTON] Selected ${selectedCards.length} cards, discarding:`, cardsToDiscard);
+      console.log(`[DISCARD BUTTON] Selected ${selectedCards.length} cards, discarding:`, selectedCards);
       
       // Disable discard button to prevent double-clicks
       discardBtn.disabled = true;
@@ -5440,7 +5665,7 @@ function initGame() {
       discardBtn.style.pointerEvents = 'none';
       
       // Discard selected cards
-      handleDiscard(localPlayerIdx, cardsToDiscard);
+      handleDiscard(localPlayerIdx, selectedCards);
       
       // Remove discard button
       setTimeout(() => discardBtn.remove(), 100);
@@ -6166,6 +6391,17 @@ function initGame() {
     if (team2ScoreEl) team2ScoreEl.textContent = gameState.teams.team2.score;
     if (roundEl) roundEl.textContent = gameState.currentRound;
     
+    // Check if any team reached 40 points - game over
+    if (gameState.teams.team1.score >= 40) {
+      console.log('[GAME OVER] Team 1 reached 40 points');
+      setTimeout(() => showGameOver('team1'), 1000);
+      return;
+    } else if (gameState.teams.team2.score >= 40) {
+      console.log('[GAME OVER] Team 2 reached 40 points');
+      setTimeout(() => showGameOver('team2'), 1000);
+      return;
+    }
+    
     // Recalculate and update probabilities for Pares and Juego
     const player1Cards = document.querySelectorAll('#player1-zone .quantum-card');
     const cardValues = [];
@@ -6343,9 +6579,10 @@ function initGame() {
         
         // If ORDAGO bet, only show PASO and ACCEPT buttons
         if (gameState.currentBet.betType === 'ordago') {
-          console.log('[ORDAGO RESPONSE] Only PASO and ACCEPT buttons available');
+          console.log('[ORDAGO RESPONSE] Only PASO and ACCEPT buttons available - hiding ENVIDO button');
           if (button1Label) button1Label.textContent = 'ORDAGO';
           if (button2Label) button2Label.textContent = 'COUNTER';
+          buttons[0].style.display = 'none'; // Hide button 0 (MUS/TENGO) - not applicable during ordago response
           buttons[1].style.display = 'none'; // Hide ENVIDO/COUNTER (can't counter ORDAGO)
           buttons[4].style.display = 'none'; // Hide ÓRDAGO button (already in ORDAGO)
         } else {
@@ -6455,6 +6692,71 @@ function initGame() {
         notification.remove();
       }, 300);
     }, 2000);
+  }
+
+  // Show temporary message to user
+  function showTemporaryMessage(message, duration = 2000) {
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(255, 67, 54, 0.95);
+      color: white;
+      padding: 20px 30px;
+      border-radius: 10px;
+      font-size: 1.2rem;
+      font-weight: 600;
+      z-index: 10000;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      animation: fadeIn 0.3s ease-out;
+    `;
+    notification.textContent = message;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+      notification.style.animation = 'fadeOut 0.3s ease-out';
+      setTimeout(() => notification.remove(), 300);
+    }, duration);
+  }
+
+  // Show team point award notification
+  function showTeamPointAward(teamKey, points, reason = '') {
+    const teamName = gameState.teams[teamKey].name;
+    const teamColor = teamKey === 'team1' ? '#2ec4b6' : '#ff9e6d';
+    
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+      position: fixed;
+      top: 100px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+      border: 2px solid ${teamColor};
+      border-radius: 15px;
+      padding: 15px 30px;
+      color: ${teamColor};
+      font-size: 1.3rem;
+      font-weight: bold;
+      z-index: 2000;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      opacity: 0;
+      transition: opacity 0.3s;
+    `;
+    
+    const reasonText = reason ? ` (${reason})` : '';
+    notification.innerHTML = `<span style="color:${teamColor};font-weight:700">${teamName}</span>: <span style="color:var(--paper-cream)">+${points} pt${points !== 1 ? 's' : ''}${reasonText}</span>`;
+    document.body.appendChild(notification);
+    
+    // Fade in
+    setTimeout(() => { notification.style.opacity = '1'; }, 10);
+    
+    // Fade out and remove
+    setTimeout(() => {
+      notification.style.opacity = '0';
+      setTimeout(() => notification.remove(), 300);
+    }, 2500);
   }
 
   function showActionNotification(playerIndex, action, extraData = {}) {

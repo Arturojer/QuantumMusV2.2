@@ -115,7 +115,9 @@ class QuantumMusGame:
             'chicaPhase': None,    # For Chica betting
             'paresPhase': None,    # For Pares betting
             'juegoPhase': None,    # For Juego betting
-            'deferredResults': []  # Store results for end-of-hand comparison
+            'deferredResults': [],  # Store results for end-of-hand comparison
+            'paresDeclarations': {},  # Player declarations for PARES round
+            'juegoDeclarations': {}   # Player declarations for JUEGO round
         }
         
         # Initialize deck and hands
