@@ -35,7 +35,7 @@ class GenericBettingHandler:
             'defendersResponded': [],  # List of defender player indices who responded
             'allPassed': True,  # Track if all players pass
             'result': None,  # Will store: {'winner': team, 'points': X, 'comparison': 'deferred'}
-            'preOrdagoBetAmount': 0,  # Track bet amount before ordago is raised
+            'previousBetAmount': 0,  # Track bet amount before the current raise
             'isFirstBet': True  # Track if this is the first bet (for 1pt rejection rule)
         }
 
@@ -230,10 +230,9 @@ class GenericBettingHandler:
         """
         phase = self.game.state[f'{self.round_type.lower()}Phase']
 
-        # If raising to ordago, save the current bet amount as pre-ordago
-        if is_ordago:
-            phase['preOrdagoBetAmount'] = phase['currentBetAmount']
-            logger.info(f"Saving pre-ordago bet amount: {phase['currentBetAmount']}")
+        # Save current bet amount as previous (before this raise)
+        phase['previousBetAmount'] = phase['currentBetAmount']
+        logger.info(f"Saving previous bet amount: {phase['currentBetAmount']}")
 
         # Update bet
         phase['currentBetAmount'] = new_bet_amount
@@ -270,28 +269,23 @@ class GenericBettingHandler:
         Both defenders rejected the bet.
         Points awarded depend on the bet sequence:
         - First bet rejected (no raises): 1 point
-        - Ordago rejected: award pre-ordago bet amount (or 1 if first bet)
-        - Other bets rejected: award current bet amount
+        - Bet raised, then rejected: award previous bet amount (before the last raise)
         Round phase ends.
         """
         phase = self.game.state[f'{self.round_type.lower()}Phase']
         phase['phaseState'] = 'RESOLVED'
         
-        # Determine points to award based on bet type and history
-        if phase['betType'] == 'ordago':
-            # Ordago rejected: award the bet amount before ordago was raised
-            points_awarded = phase.get('preOrdagoBetAmount', 1)
-            if points_awarded == 0:
-                points_awarded = 1  # If ordago was the first bet, award 1
-            logger.info(f"Ordago rejected in {self.round_type} - awarding pre-ordago amount: {points_awarded}")
-        elif phase.get('isFirstBet', True):
+        # Determine points to award based on bet history
+        if phase.get('isFirstBet', True):
             # First bet rejected with no raises: award 1 point
             points_awarded = 1
             logger.info(f"First bet rejected in {self.round_type} - awarding 1 point")
         else:
-            # Normal bet rejected after raises: award current (cumulative) bet amount
-            points_awarded = phase['currentBetAmount']
-            logger.info(f"Bet rejected after raises in {self.round_type} - awarding cumulative amount: {points_awarded}")
+            # Bet was raised, then rejected: award the bet amount BEFORE the last raise
+            points_awarded = phase.get('previousBetAmount', 1)
+            if points_awarded == 0:
+                points_awarded = 1  # Safety fallback
+            logger.info(f"Bet rejected after raise in {self.round_type} - awarding previous bet amount: {points_awarded}")
         
         phase['result'] = {
             'winner': winning_team,
