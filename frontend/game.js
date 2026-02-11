@@ -926,6 +926,11 @@ function initGame() {
         if (gameState.currentBet && gameState.currentBet.bettingTeam) {
           console.log(`[ONLINE] Active bet detected: ${gameState.currentBet.betType} for ${gameState.currentBet.amount} by ${gameState.currentBet.bettingTeam}`);
           console.log(`[ONLINE] Local player team: ${getPlayerTeam(0)}, Active player: ${gameState.activePlayerIndex + 1}`);
+          
+          // If ordago bet, log button visibility intent
+          if (gameState.currentBet.betType === 'ordago') {
+            console.log('[ONLINE] ORDAGO bet detected - envido button will be hidden');
+          }
         }
         
         // Show action notification for received actions
@@ -6374,11 +6379,12 @@ function initGame() {
         
         // If ORDAGO bet, only show PASO and ACCEPT buttons
         if (gameState.currentBet.betType === 'ordago') {
-          console.log('[ORDAGO RESPONSE] Only PASO and ACCEPT buttons available');
+          console.log('[ORDAGO RESPONSE] Only PASO and ACCEPT buttons available - hiding ENVIDO button');
           if (button1Label) button1Label.textContent = 'ORDAGO';
           if (button2Label) button2Label.textContent = 'COUNTER';
           buttons[1].style.display = 'none'; // Hide ENVIDO/COUNTER (can't counter ORDAGO)
           buttons[4].style.display = 'none'; // Hide ÓRDAGO button (already in ORDAGO)
+          buttons[0].style.display = 'none'; // Hide button 0 as well to be safe
         } else {
           // For regular bets (ENVIDO), allow counter-raises and ÓRDAGO
           if (button1Label) button1Label.textContent = 'MUS';
