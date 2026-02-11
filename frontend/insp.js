@@ -2287,28 +2287,33 @@ function initGame() {
     if (!fill) return;
 
     fill.style.width = '100%';
+    
+    // Wait for visual bar to render, THEN start the countdown timer
     requestAnimationFrame(() => {
       fill.style.transition = `width ${duration}s linear`;
       fill.style.width = '0%';
+      
+      // Now that the visual timer bar is animating, start the actual countdown
+      // Delay by 50ms to ensure the bar is visible before countdown begins
+      setTimeout(() => {
+        timerInterval = setTimeout(() => {
+          console.log(`Timer expired for player ${index + 1}`);
+          // Clear the interval to prevent multiple triggers
+          timerInterval = null;
+          // Timeout - auto action
+          if (onTimeout) {
+            onTimeout();
+          } else {
+            handleTimeout(index);
+          }
+        }, duration * 1000);
+        
+        // If AI player (not local player), make decision
+        if (index !== localPlayerIndex) {
+          makeAIDecision(index);
+        }
+      }, 50);
     });
-
-    // Set new timeout
-    timerInterval = setTimeout(() => {
-      console.log(`Timer expired for player ${index + 1}`);
-      // Clear the interval to prevent multiple triggers
-      timerInterval = null;
-      // Timeout - auto action
-      if (onTimeout) {
-        onTimeout();
-      } else {
-        handleTimeout(index);
-      }
-    }, duration * 1000);
-    
-    // If AI player (not local player), make decision
-    if (index !== localPlayerIndex) {
-      makeAIDecision(index);
-    }
   }
   
   // Update visual highlight for active player
@@ -2358,9 +2363,18 @@ function initGame() {
       timerInterval = null;
     }
     
+    console.log(`[START ALL TIMERS] Starting ${duration}s countdown for all players (bot mode)`);
+    
     for (let i = 0; i < 4; i++) {
+      const timerBar = document.querySelector(`#timer-bar-player${i + 1}`);
       const fill = document.querySelector(`#timer-bar-player${i + 1} .timer-bar-fill`);
-      if (fill) {
+      if (fill && timerBar) {
+        // Make timer bars fully visible with all necessary properties
+        timerBar.style.display = 'block';
+        timerBar.style.opacity = '1';
+        timerBar.style.visibility = 'visible';
+        fill.style.display = 'block';
+        fill.style.opacity = '1';
         fill.style.transition = 'none';
         fill.style.width = '0%';
         
@@ -2371,15 +2385,21 @@ function initGame() {
             fill.style.width = '0%';
           });
         });
+        console.log(`[TIMER START] player${i + 1} timer bar rendered and animating`);
+      } else {
+        console.warn(`[TIMER START] player${i + 1} timer bar NOT FOUND - timerBar=${!!timerBar}, fill=${!!fill}`);
       }
     }
     
-    timerInterval = setTimeout(() => {
-      console.log('All players timer expired - handling all players timeout');
-      timerInterval = null;
-      // All timers expired - auto discard all cards for players who haven't acted
-      handleAllPlayersTimeout();
-    }, duration * 1000);
+    // Wait for visual bars to render, THEN start the countdown
+    setTimeout(() => {
+      timerInterval = setTimeout(() => {
+        console.log('All players timer expired - handling all players timeout');
+        timerInterval = null;
+        // All timers expired - auto discard all cards for players who haven't acted
+        handleAllPlayersTimeout();
+      }, duration * 1000);
+    }, 50);
   }
   
   // Handle timeout for a player
