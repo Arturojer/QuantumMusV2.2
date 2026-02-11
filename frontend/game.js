@@ -6382,9 +6382,9 @@ function initGame() {
           console.log('[ORDAGO RESPONSE] Only PASO and ACCEPT buttons available - hiding ENVIDO button');
           if (button1Label) button1Label.textContent = 'ORDAGO';
           if (button2Label) button2Label.textContent = 'COUNTER';
+          buttons[0].style.display = 'none'; // Hide button 0 (MUS/TENGO) - not applicable during ordago response
           buttons[1].style.display = 'none'; // Hide ENVIDO/COUNTER (can't counter ORDAGO)
           buttons[4].style.display = 'none'; // Hide ÓRDAGO button (already in ORDAGO)
-          buttons[0].style.display = 'none'; // Hide button 0 as well to be safe
         } else {
           // For regular bets (ENVIDO), allow counter-raises and ÓRDAGO
           if (button1Label) button1Label.textContent = 'MUS';

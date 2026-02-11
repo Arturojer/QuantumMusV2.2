@@ -338,6 +338,8 @@ class GrandeBettingHandler:
             team1_best = get_highest_card(team1_cards, self.game.game_mode)
             team2_best = get_highest_card(team2_cards, self.game.game_mode)
             
+            # Default to 'A' (Ace) if no cards found - shouldn't happen in normal gameplay
+            # but provides safe fallback for edge cases
             result = compare_cards(
                 team1_best['value'] if team1_best else 'A',
                 team2_best['value'] if team2_best else 'A',

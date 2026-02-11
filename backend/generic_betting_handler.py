@@ -341,12 +341,15 @@ class GenericBettingHandler:
                 team1_best = get_highest_card(team1_cards, self.game.game_mode)
                 team2_best = get_highest_card(team2_cards, self.game.game_mode)
                 
+                # Default to 'A' (Ace) if no cards found - shouldn't happen in normal gameplay
                 result = compare_cards(
                     team1_best['value'] if team1_best else 'A',
                     team2_best['value'] if team2_best else 'A',
                     self.game.game_mode
                 )
                 
+                # Ties go to team1 for GRANDE ordago resolution
+                # (In normal deferred resolution, ties go to Mano's team)
                 winner_team = 'team1' if result >= 0 else 'team2'
                 
             elif self.round_type == 'CHICA':
@@ -354,6 +357,8 @@ class GenericBettingHandler:
                 team1_best = get_lowest_card(team1_cards, self.game.game_mode)
                 team2_best = get_lowest_card(team2_cards, self.game.game_mode)
                 
+                # Default to 'K' (King - highest card) for CHICA fallback
+                # In CHICA, lower is better, so defaulting to highest card (worst possible)
                 result = compare_cards(
                     team1_best['value'] if team1_best else 'K',
                     team2_best['value'] if team2_best else 'K',
@@ -361,6 +366,7 @@ class GenericBettingHandler:
                     lower_wins=True
                 )
                 
+                # Ties go to team1 for CHICA ordago resolution
                 winner_team = 'team1' if result >= 0 else 'team2'
                 
             elif self.round_type == 'PARES':
