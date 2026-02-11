@@ -121,35 +121,36 @@ class QuantumDeck:
         }
 
     # ------------------------------------------------------------
-    # Rey-Pito "entrelazado" (simple + consistente)
+    # Rey-As "entrelazado" (King-Ace entanglement)
     # ------------------------------------------------------------
     def collapse_king_pit(self, palo: str) -> Tuple[str, str]:
         """
-        Colapsa el par Rey-Pito de un palo de manera consistente:
-        - Primera vez: decide aleatoriamente si queda (Rey,Pito) o (Pito,Rey)
+        Colapsa el par Rey-As de un palo de manera consistente:
+        - Primera vez: decide aleatoriamente si queda (Rey,As) o (As,Rey)
         - A partir de ahí: siempre devuelve lo mismo (cache).
+        Entanglement: K (12) ↔ A (1) within same suit
         """
         if palo not in self.PALO_CODE:
             raise ValueError(f"Palo inválido: {palo}")
 
         if not self.enable_king_pit_entanglement:
-            # Sin entrelazamiento: simplemente "Rey" y "Pito" normales
+            # Sin entrelazamiento: simplemente "Rey" y "As" normales
             rey = self.PALO_CODE[palo] + self.VALOR_CODE[12]
-            pito = self.PALO_CODE[palo] + self.VALOR_CODE[10]
-            return rey, pito
+            as_card = self.PALO_CODE[palo] + self.VALOR_CODE[1]
+            return rey, as_card
 
         if palo in self.king_pit_collapsed:
             return self.king_pit_collapsed[palo]
 
         rey = self.PALO_CODE[palo] + self.VALOR_CODE[12]
-        pito = self.PALO_CODE[palo] + self.VALOR_CODE[10]
+        as_card = self.PALO_CODE[palo] + self.VALOR_CODE[1]
 
-        # Colapso: o se quedan como (Rey,Pito) o se "intercambian identidades"
+        # Colapso: o se quedan como (Rey,As) o se "intercambian identidades"
         # Use quantum randomness instead of numpy
         if self.qrng.random_float() < 0.5:
-            pair = (rey, pito)
+            pair = (rey, as_card)
         else:
-            pair = (pito, rey)
+            pair = (as_card, rey)
 
         self.king_pit_collapsed[palo] = pair
         return pair

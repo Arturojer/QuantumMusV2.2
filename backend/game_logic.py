@@ -888,32 +888,35 @@ class QuantumMusGame:
         """
         Check if PARES outcome is certain despite having entangled cards
         Returns True (always has pares), False (never has pares), or None (uncertain)
+        
+        Entanglement: K↔A and 2↔3 (mode 8) can swap values within same suit
         """
         # Get entangled cards and their possible values
         entangled_cards = []
         collapsed_cards = []
         
         for card in hand:
-            if getattr(card, 'is_collapsed', False):
-                collapsed_cards.append(getattr(card, 'value', ''))
+            is_collapsed = getattr(card, 'is_collapsed', False)
+            card_value = getattr(card, 'value', '')
+            
+            if is_collapsed:
+                # Card has collapsed to a definite value
+                collapsed_cards.append(card_value)
             else:
-                # Entangled card - get both possible values using entanglement system
-                main_value = getattr(card, 'value', '')
-                suit = getattr(card, 'suit', '')
-                
-                # Try to get partner card from entanglement system
-                partner_card_info = self.entanglement.get_partner_card(main_value, suit)
-                if partner_card_info:
-                    partner_value = partner_card_info.get('value', '')
-                    if partner_value and partner_value != main_value:
-                        entangled_cards.append([main_value, partner_value])
-                    else:
-                        # If partner value is same or empty, card not truly entangled
-                        # Should require manual declaration
-                        return None
+                # Card is in superposition - determine possible values
+                # K↔A entanglement (always active)
+                if card_value == 'K':
+                    entangled_cards.append(['K', 'A'])
+                elif card_value == 'A':
+                    entangled_cards.append(['A', 'K'])
+                # 2↔3 entanglement (only in mode 8)
+                elif self.game_mode == '8' and card_value == '2':
+                    entangled_cards.append(['2', '3'])
+                elif self.game_mode == '8' and card_value == '3':
+                    entangled_cards.append(['3', '2'])
                 else:
-                    # Card marked as entangled but no partner found
-                    # Must require manual declaration (uncertain outcome)
+                    # Non-entangled card but not collapsed - shouldn't happen
+                    # but if it does, require manual declaration
                     return None
         
         if not entangled_cards:
@@ -959,6 +962,8 @@ class QuantumMusGame:
         """
         Check if JUEGO outcome is certain despite having entangled cards
         Returns True (always has juego), False (never has juego), or None (uncertain)
+        
+        Entanglement: K↔A and 2↔3 (mode 8) can swap values within same suit
         """
         def get_card_points(val):
             if val == 'A':
@@ -979,26 +984,27 @@ class QuantumMusGame:
         collapsed_points = 0
         
         for card in hand:
-            if getattr(card, 'is_collapsed', False):
-                collapsed_points += get_card_points(getattr(card, 'value', ''))
+            is_collapsed = getattr(card, 'is_collapsed', False)
+            card_value = getattr(card, 'value', '')
+            
+            if is_collapsed:
+                # Card has collapsed to a definite value
+                collapsed_points += get_card_points(card_value)
             else:
-                # Entangled card - get both possible values using entanglement system
-                main_value = getattr(card, 'value', '')
-                suit = getattr(card, 'suit', '')
-                
-                # Try to get partner card from entanglement system
-                partner_card_info = self.entanglement.get_partner_card(main_value, suit)
-                if partner_card_info:
-                    partner_value = partner_card_info.get('value', '')
-                    if partner_value and partner_value != main_value:
-                        entangled_cards.append([main_value, partner_value])
-                    else:
-                        # If partner value is same or empty, card not truly entangled
-                        # Should require manual declaration
-                        return None
+                # Card is in superposition - determine possible values
+                # K↔A entanglement (always active)
+                if card_value == 'K':
+                    entangled_cards.append(['K', 'A'])
+                elif card_value == 'A':
+                    entangled_cards.append(['A', 'K'])
+                # 2↔3 entanglement (only in mode 8)
+                elif self.game_mode == '8' and card_value == '2':
+                    entangled_cards.append(['2', '3'])
+                elif self.game_mode == '8' and card_value == '3':
+                    entangled_cards.append(['3', '2'])
                 else:
-                    # Card marked as entangled but no partner found
-                    # Must require manual declaration (uncertain outcome)
+                    # Non-entangled card but not collapsed - shouldn't happen
+                    # but if it does, require manual declaration
                     return None
         
         if not entangled_cards:
