@@ -897,18 +897,27 @@ class QuantumMusGame:
             if getattr(card, 'is_collapsed', False):
                 collapsed_cards.append(getattr(card, 'value', ''))
             else:
-                # Entangled card - get both possible values
+                # Entangled card - get both possible values using entanglement system
                 main_value = getattr(card, 'value', '')
-                partner_card_id = getattr(card, 'partner_card_id', None)
-                if partner_card_id and partner_card_id.partner_id:
-                    # Get partner's value
-                    partner_value = self._get_card_value_by_id(partner_card_id.partner_id)
-                    entangled_cards.append([main_value, partner_value])
+                suit = getattr(card, 'suit', '')
+                
+                # Try to get partner card from entanglement system
+                partner_card_info = self.entanglement.get_partner_card(main_value, suit)
+                if partner_card_info:
+                    partner_value = partner_card_info.get('value', '')
+                    if partner_value and partner_value != main_value:
+                        entangled_cards.append([main_value, partner_value])
+                    else:
+                        # If partner value is same or empty, card not truly entangled
+                        # Should require manual declaration
+                        return None
                 else:
-                    entangled_cards.append([main_value])
+                    # Card marked as entangled but no partner found
+                    # Must require manual declaration (uncertain outcome)
+                    return None
         
         if not entangled_cards:
-            # Should not happen, but treat as collapsed case
+            # All cards collapsed, check directly
             return self._has_pares(hand)
         
         # Check all possible combinations
@@ -973,14 +982,24 @@ class QuantumMusGame:
             if getattr(card, 'is_collapsed', False):
                 collapsed_points += get_card_points(getattr(card, 'value', ''))
             else:
-                # Entangled card - get both possible values
+                # Entangled card - get both possible values using entanglement system
                 main_value = getattr(card, 'value', '')
-                partner_card_id = getattr(card, 'partner_card_id', None)
-                if partner_card_id and partner_card_id.partner_id:
-                    partner_value = self._get_card_value_by_id(partner_card_id.partner_id)
-                    entangled_cards.append([main_value, partner_value])
+                suit = getattr(card, 'suit', '')
+                
+                # Try to get partner card from entanglement system
+                partner_card_info = self.entanglement.get_partner_card(main_value, suit)
+                if partner_card_info:
+                    partner_value = partner_card_info.get('value', '')
+                    if partner_value and partner_value != main_value:
+                        entangled_cards.append([main_value, partner_value])
+                    else:
+                        # If partner value is same or empty, card not truly entangled
+                        # Should require manual declaration
+                        return None
                 else:
-                    entangled_cards.append([main_value])
+                    # Card marked as entangled but no partner found
+                    # Must require manual declaration (uncertain outcome)
+                    return None
         
         if not entangled_cards:
             # All collapsed
