@@ -32,11 +32,14 @@ class QuantumMusGame:
         elif len(players) > 4:
             logger.warning(f"Game designed for 4 players, got {len(players)} (extras may not have teams)")
         
-        # Seating plan: interleave teams when possible
+        # Seating plan: interleave teams so teammates face each other
+        # Team 1 (Copenhagen): Preskill, Zoller, Broadbent, Yunger Halpern
+        # Team 2 (Bohmian): Cirac, Deutsch, Simmons, Hallberg
         team1_players = [p for p in self.players if p.get('team') == 1]
         team2_players = [p for p in self.players if p.get('team') == 2]
         unassigned_players = [p for p in self.players if p.get('team') not in (1, 2)]
 
+        # Interleave: Team1, Team2, Team1, Team2 so teammates face each other
         if team1_players and team2_players:
             interleaved_players = []
             max_len = max(len(team1_players), len(team2_players))
@@ -48,18 +51,34 @@ class QuantumMusGame:
             if unassigned_players:
                 interleaved_players.extend(unassigned_players)
             self.players = interleaved_players
+        
         # Store actual number of players for dynamic calculations
         self.num_players = len(self.players)
         
-        # Build teams from lobby data if not provided explicitly
+        # Build teams from the interleaved player positions
+        # After interleaving, positions are: Team1, Team2, Team1, Team2, ...
+        # So Team1 gets even indices [0, 2] and Team2 gets odd indices [1, 3]
         if teams is None:
             teams = {
                 'team1': {'players': [], 'score': 0, 'name': 'Copenhaguen'},
                 'team2': {'players': [], 'score': 0, 'name': 'Bohmian'}
             }
 
-        team1_indices = [i for i in range(self.num_players) if i % 2 == 0]
-        team2_indices = [i for i in range(self.num_players) if i % 2 == 1]
+        # Assign indices based on actual team membership after interleaving
+        team1_indices = []
+        team2_indices = []
+        for i in range(self.num_players):
+            player_team = self.players[i].get('team')
+            if player_team == 1:
+                team1_indices.append(i)
+            elif player_team == 2:
+                team2_indices.append(i)
+            # If no team assigned, default to even/odd assignment
+            elif i % 2 == 0:
+                team1_indices.append(i)
+            else:
+                team2_indices.append(i)
+        
         teams = {
             'team1': {
                 'players': team1_indices,
@@ -73,6 +92,7 @@ class QuantumMusGame:
             }
         }
         logger.info(f"Teams for room {room_id}: team1={teams['team1']['players']}, team2={teams['team2']['players']}")
+        logger.info(f"Player order: {[p.get('character', 'unknown') for p in self.players]}")
         
         # Game state
         self.state = {
@@ -321,9 +341,15 @@ class QuantumMusGame:
             self.reset_round_state()
             self.state['activePlayerIndex'] = self.state['manoIndex']
             
-            # Initialize Grande phase if entering Grande
+            # Initialize the appropriate betting handler for each round
             if self.state['currentRound'] == 'GRANDE':
                 self.round_handler.grande_handler.initialize_grande_phase()
+            elif self.state['currentRound'] == 'CHICA':
+                self.round_handler.chica_handler.initialize_round()
+            elif self.state['currentRound'] == 'PARES':
+                self.round_handler.pares_handler.initialize_round()
+            elif self.state['currentRound'] == 'JUEGO':
+                self.round_handler.juego_handler.initialize_round()
             
             logger.info(f"Advanced to round {self.state['currentRound']}")
             return False  # Game continues
