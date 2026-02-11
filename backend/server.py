@@ -836,17 +836,20 @@ def handle_player_declaration(data):
         emit('game_error', {'error': 'Not your turn'})
         return
     
+    # Check if this is an auto-declaration (indicated by client)
+    is_auto_declared = data.get('is_auto_declared', False)
+    
     # Store declaration in game state
     key = 'paresDeclarations' if round_name == 'PARES' else 'juegoDeclarations'
     if key not in game.state:
         game.state[key] = {}
     game.state[key][player_index] = declaration
     
-    logger.info(f"Player {player_index} declared '{declaration}' in {round_name} for room {room_id}")
+    logger.info(f"Player {player_index} declared '{declaration}' in {round_name} for room {room_id} (auto: {is_auto_declared})")
     
-    # For 'puede' declarations or auto-declarations, advance to next player
-    # (tengo/no tengo will wait for collapse event to advance)
-    advance_turn = (declaration == 'puede')
+    # Advance turn for 'puede' declarations OR auto-declarations
+    # (manual tengo/no tengo will wait for collapse event to advance)
+    advance_turn = (declaration == 'puede') or is_auto_declared
     if advance_turn:
         game.next_player()
     
@@ -858,6 +861,7 @@ def handle_player_declaration(data):
         'round_name': round_name,
         'declarations': game.state[key],
         'next_player': game.state['activePlayerIndex'] if advance_turn else None,
+        'is_auto_declared': is_auto_declared,
         'timestamp': datetime.utcnow().isoformat()
     }, room=room_id)
 

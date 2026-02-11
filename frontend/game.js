@@ -3093,25 +3093,28 @@ function initGame() {
   }
   
   // Make a declaration in online mode (sends to server)
-  function makeDeclaration(playerIndex, declaration, roundName) {
+  function makeDeclaration(playerIndex, declaration, roundName, isAutoDeclaration = false) {
     if (!window.onlineMode || !window.QuantumMusSocket || !window.QuantumMusOnlineRoom) {
       console.warn('[makeDeclaration] Not in online mode, ignoring');
       return;
     }
     
     const serverIdx = localToServer(playerIndex);
-    console.log(`[makeDeclaration] Player ${playerIndex + 1} (server ${serverIdx}) declaring '${declaration}' in ${roundName}`);
+    console.log(`[makeDeclaration] Player ${playerIndex + 1} (server ${serverIdx}) declaring '${declaration}' in ${roundName} (auto: ${isAutoDeclaration})`);
     
     // First, send the declaration to store it
     window.QuantumMusSocket.emit('player_declaration', {
       room_id: window.QuantumMusOnlineRoom,
       player_index: serverIdx,
       declaration: declaration === 'tengo' ? true : declaration === 'no_tengo' ? false : 'puede',
-      round_name: roundName
+      round_name: roundName,
+      is_auto_declared: isAutoDeclaration
     });
     
-    // If tengo or no_tengo, trigger collapse (wait for server response to advance turn)
-    if (declaration === 'tengo' || declaration === 'no_tengo') {
+    // ONLY trigger collapse for MANUAL tengo/no_tengo declarations
+    // Auto-declarations NEVER trigger collapse (cards already collapsed)
+    if ((declaration === 'tengo' || declaration === 'no_tengo') && !isAutoDeclaration) {
+      console.log(`[makeDeclaration] Manual declaration, triggering collapse`);
       window.QuantumMusSocket.emit('trigger_declaration_collapse', {
         room_id: window.QuantumMusOnlineRoom,
         player_index: serverIdx,
@@ -3152,7 +3155,7 @@ function initGame() {
       if (isOnlineGame && typeof makeDeclaration === 'function') {
         const declStr = declaration === true ? 'tengo' : declaration === false ? 'no_tengo' : 'puede';
         try { 
-          makeDeclaration(playerIndex, declStr, 'PARES');
+          makeDeclaration(playerIndex, declStr, 'PARES', false); // false = manual declaration
           // For tengo/no_tengo, wait for server collapse response before advancing
           // For puede, server will send next_player in declaration_made event
           if (declaration !== 'puede') {
@@ -3170,41 +3173,25 @@ function initGame() {
         startPlayerTurnTimer(gameState.activePlayerIndex);
       }
     } else {
-      // Auto-declared - for online mode, still need to send to server
+      // Auto-declared - cards are already collapsed, NO collapse needed
+      console.log(`[AUTO-DECLARATION] Player ${playerIndex + 1} auto-declared, no collapse needed (cards already collapsed)`);
+      
       if (isOnlineGame && typeof makeDeclaration === 'function') {
         const declStr = declaration === true ? 'tengo' : declaration === false ? 'no_tengo' : 'puede';
         try { 
-          makeDeclaration(playerIndex, declStr, 'PARES');
+          makeDeclaration(playerIndex, declStr, 'PARES', true); // true = auto-declaration, NO collapse
           
-          // For auto-declarations with tengo/no_tengo, immediately trigger collapse
-          if (declaration !== 'puede') {
-            // Auto-collapse happens immediately for 0%/100% cases
-            console.log(`[AUTO-DECLARATION] Triggering immediate collapse for player ${playerIndex}`);
-            // Small delay to let server process declaration first
-            setTimeout(() => {
-              // Trigger collapse on server
-              const socket = window.QuantumMusSocket;
-              const roomId = window.QuantumMusOnlineRoom;
-              if (socket && roomId) {
-                socket.emit('trigger_declaration_collapse', {
-                  room_id: roomId,
-                  player_index: playerIndex,
-                  declaration: declStr,
-                  round_name: 'PARES'
-                });
-              }
-            }, 100);
-          }
-          // Server will handle turn advancement via socket events
+          // For auto-declarations, DON'T trigger collapse (cards already collapsed)
+          // Just advance turn - server will handle it via declaration_made event
+          console.log(`[AUTO-DECLARATION] Sent to server, waiting for turn advancement`);
         } catch (e) { 
           console.error('[handleParesDeclaration] Error calling makeDeclaration:', e);
         }
       } else {
-        // Local mode
-        if (declaration === true || declaration === false) {
-          collapseOnDeclaration(playerIndex, 'PARES', declaration);
-        }
-        // Note: Turn advancement handled by proceedWithParesDeclaration in local mode
+        // Local mode - NO collapse for auto-declarations
+        // Cards are already collapsed, just advance turn
+        console.log(`[AUTO-DECLARATION] Local mode, advancing turn without collapse`);
+        // Turn advancement handled by proceedWithParesDeclaration
       }
     }
     
