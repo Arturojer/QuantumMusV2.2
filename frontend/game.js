@@ -11,15 +11,33 @@ function mapBackendCardToFrontend(cardData) {
     espada: 'espadas',
     basto: 'bastos'
   };
-  const rawSuit = (cardData && typeof cardData.palo !== 'undefined') ? String(cardData.palo).toLowerCase() : '';
+  // Support both old format (palo/valor) and new format (suit/value)
+  const rawSuit = (cardData && typeof cardData.palo !== 'undefined') 
+    ? String(cardData.palo).toLowerCase() 
+    : (cardData && cardData.suit) ? String(cardData.suit).toLowerCase() : '';
   const suit = suitMap[rawSuit] || suitMap[rawSuit.replace(/s$/, '')] || rawSuit;
-  const rawValue = cardData ? cardData.valor : undefined;
+  
+  const rawValue = cardData ? (cardData.valor || cardData.value) : undefined;
   let value = rawValue;
   if (rawValue === '1' || rawValue === 1) value = 'A';
   else if (rawValue === '10' || rawValue === 10) value = 'J';
   else if (rawValue === '11' || rawValue === 11) value = 'Q';
   else if (rawValue === '12' || rawValue === 12) value = 'K';
-  return { value, suit };
+  
+  // Preserve entanglement data from backend
+  return { 
+    value, 
+    suit,
+    is_entangled: cardData?.is_entangled || false,
+    entangled_partner_value: cardData?.entangled_partner_value,
+    entangled_partner_suit: cardData?.entangled_partner_suit,
+    is_superposed: cardData?.is_superposed || false,
+    superposed_value: cardData?.superposed_value,
+    coefficient_a: cardData?.coefficient_a,
+    coefficient_b: cardData?.coefficient_b,
+    is_collapsed: cardData?.is_collapsed || false,
+    collapsed_value: cardData?.collapsed_value
+  };
 }
 
 // Export gameInitialized so it can be reset from navigation.js
@@ -397,15 +415,43 @@ function logHandsAndGlow() {
 // Update entanglement state from server
 function updateEntanglementState(entanglementData) {
   if (!entanglementData) return;
-  
+
   gameState.entanglement.pairs = entanglementData.pairs || [];
   gameState.entanglement.events = entanglementData.events || [];
   gameState.entanglement.statistics = entanglementData.statistics || gameState.entanglement.statistics;
-  
+
   // Update player entanglement maps
   for (let playerIdx = 0; playerIdx < 4; playerIdx++) {
     gameState.entanglement.playerEntanglements[playerIdx] = getPlayerEntangledCardsFromPairs(playerIdx);
   }
+}
+
+// Apply entanglement glows based on server data
+function applyEntanglementGlows(gameStateData) {
+  if (!gameStateData || !gameStateData.entanglement_glows) return;
+
+  const glowData = gameStateData.entanglement_glows;
+  const glowingCardIndices = glowData.my_cards || [];
+
+  // For local player (player 0), apply glows to specified cards
+  const playerZone = document.getElementById('player1-zone');
+  if (!playerZone) return;
+
+  const cards = playerZone.querySelectorAll('.quantum-card');
+
+  cards.forEach((card, index) => {
+    if (glowingCardIndices.includes(index)) {
+      // Add glow class if not already present
+      if (!card.classList.contains('entangled-card')) {
+        card.classList.add('entangled-card');
+      }
+    } else {
+      // Remove glow class if present
+      if (card.classList.contains('entangled-card')) {
+        card.classList.remove('entangled-card');
+      }
+    }
+  });
 }
 
 // Helper to build player entanglement map from pairs
@@ -765,7 +811,7 @@ function initGame() {
           const mappedCard = mapBackendCardToFrontend(card);
           const suit = mappedCard.suit || 'oros';
           const map = suitMap[suit] || suitMap.oros;
-          const cardEl = createCard(mappedCard.value, map[0], map[1], i, isCurrentPlayer, isTeammate, map[2], localIdx, gameMode);
+          const cardEl = createCard(mappedCard.value, map[0], map[1], i, isCurrentPlayer, isTeammate, map[2], localIdx, gameMode, mappedCard);
           if (cardEl) {
             cardsRow.appendChild(cardEl);
             // Forzar visibilidad inmediata eliminando la clase de animacion pendiente
@@ -797,9 +843,12 @@ function initGame() {
       }
       gameState.currentBet = st.currentBet || gameState.currentBet;
       gameState.waitingForDiscard = st.waitingForDiscard || false;
-      if (gs.entanglement) {
-        updateEntanglementState(gs.entanglement);
-      }
+        if (gs.entanglement) {
+          updateEntanglementState(gs.entanglement);
+        }
+        if (data.game_state && data.game_state.entanglement_glows) {
+          applyEntanglementGlows(data.game_state);
+        }
       if (payload.game_state && payload.game_state.player_hands) {
         renderHandsFromServer(payload.game_state.player_hands, payload.game_mode || window.currentGameMode || (window.onlineMode ? '8' : '4'));
       } else if (payload.player_hands) {
@@ -836,7 +885,7 @@ function initGame() {
       hand.forEach((c, i) => {
         const mappedCard = mapBackendCardToFrontend(c);
         const s = suitMap[mappedCard.suit] || suitMap.oros;
-        const card = createCard(mappedCard.value, s[0], s[1], i, true, false, s[2], 0, gameMode);
+        const card = createCard(mappedCard.value, s[0], s[1], i, true, false, s[2], 0, gameMode, mappedCard);
         if (card) {
           handContainer.appendChild(card);
           // Forzar visibilidad inmediata eliminando la clase de animacion pendiente
@@ -6320,7 +6369,7 @@ function initGame() {
     return colorValues[index] || '#2ec4b6';
   }
 
-  function createCard(value, suit, suitSymbol, index, isCurrentPlayer, isTeammate, suitColor, playerIndex, gameMode = '4') {
+  function createCard(value, suit, suitSymbol, index, isCurrentPlayer, isTeammate, suitColor, playerIndex, gameMode = '4', serverCardData = null) {
     // Log gameMode for debugging
     if (playerIndex === 0 && index === 0) {
       console.log(`[CREATE CARD] Creating cards with gameMode: ${gameMode}, value: ${value}, onlineMode: ${window.onlineMode}`);
@@ -6350,42 +6399,54 @@ function initGame() {
     }
     card.style.setProperty('--rotation', `${cardRotation}deg`);
 
-    // Determine if card is entangled
+    // Determine if card is entangled - prefer server data if available
     let isEntangled = false;
     let isSuperposed = false;
-    
-    // A and K are ALWAYS entangled with each other (A↔K) in both 4 and 8 reyes
-    // 2 and 3 are entangled with each other (2↔3) ONLY in 8 reyes mode
-    // J and Q are NEVER entangled
-    const is8Reyes = gameMode === '8';
-    if (value === 'A' || value === 'K') {
-      isEntangled = true;
-    } else if (is8Reyes && (value === '2' || value === '3')) {
-      isEntangled = true;
-    }
-    // Superposition disabled - all other cards (including J, Q) are regular
-    
-    const cardValues = ['A', '2', '3', '4', '5', '6', '7', 'J', 'Q', 'K'];
     let entangledPartner = '';
     let superposedValue = '';
     let coefficientA = 0;
     let coefficientB = 0;
     
-    if (isEntangled) {
-      if (value === 'A') {
-        entangledPartner = 'K';
-      } else if (value === 'K') {
-        entangledPartner = 'A';
-      } else if (value === '2') {
-        entangledPartner = '3';
-      } else if (value === '3') {
-        entangledPartner = '2';
+    // Use server card data if provided (online mode)
+    if (serverCardData && serverCardData.is_entangled) {
+      isEntangled = true;
+      entangledPartner = serverCardData.entangled_partner_value || '';
+      coefficientA = serverCardData.coefficient_a || 0.7071;
+      coefficientB = serverCardData.coefficient_b || 0.7071;
+      console.log(`[CREATE CARD] Using server entanglement data: ${value}↔${entangledPartner}`);
+    } else {
+      // Local determination (offline mode)
+      // A and K are ALWAYS entangled with each other (A↔K) in both 4 and 8 reyes
+      // 2 and 3 are entangled with each other (2↔3) ONLY in 8 reyes mode
+      // J and Q are NEVER entangled
+      const is8Reyes = gameMode === '8';
+      if (value === 'A' || value === 'K') {
+        isEntangled = true;
+      } else if (is8Reyes && (value === '2' || value === '3')) {
+        isEntangled = true;
       }
+      // Superposition disabled - all other cards (including J, Q) are regular
       
-      // Entangled cards are always 50-50
-      coefficientA = 0.7071; // sqrt(2)/2 ≈ 0.707
-      coefficientB = 0.7071; // sqrt(2)/2 ≈ 0.707
-      
+      if (isEntangled) {
+        if (value === 'A') {
+          entangledPartner = 'K';
+        } else if (value === 'K') {
+          entangledPartner = 'A';
+        } else if (value === '2') {
+          entangledPartner = '3';
+        } else if (value === '3') {
+          entangledPartner = '2';
+        }
+        
+        // Entangled cards are always 50-50
+        coefficientA = 0.7071; // sqrt(2)/2 ≈ 0.707
+        coefficientB = 0.7071; // sqrt(2)/2 ≈ 0.707
+      }
+    }
+    
+    const cardValues = ['A', '2', '3', '4', '5', '6', '7', 'J', 'Q', 'K'];
+    
+    if (isEntangled) {
       // Solo agregar glow entrelazado si:
       // 1. Es el jugador actual (player1), O
       // 2. Es el compañero (player3, top) Y será verificado después

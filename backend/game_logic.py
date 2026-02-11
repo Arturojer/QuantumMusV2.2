@@ -374,7 +374,10 @@ class QuantumMusGame:
         for my_idx, my_card in enumerate(my_hand):
             if not getattr(my_card, 'is_entangled', False):
                 continue
-            
+
+            if getattr(my_card, 'is_collapsed', False):
+                continue
+
             # Esta carta está entrelazada - buscar su pareja en mano del compañero
             my_palo = getattr(my_card, 'palo', None) or my_card.get('palo')
             my_valor = getattr(my_card, 'valor', None) or my_card.get('valor')

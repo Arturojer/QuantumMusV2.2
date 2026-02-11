@@ -57,14 +57,14 @@ class QuantumCollapseManager:
         Returns: CollapseEvent object
         """
         card = self.game.hands[player_index][card_index]
-        
+
         if not card.is_entangled or card.is_collapsed:
             return None
-        
+
         # Generate deterministic seed for this collapse
         # This ensures all clients in the game collapse the same way
         collapse_seed = f"{self.game.room_id}|collapse|{self.game.state['currentRound']}|{player_index}|{card_index}"
-        
+
         # Determine which value this card will collapse to
         if chosen_value:
             collapsed_value = chosen_value
@@ -73,25 +73,25 @@ class QuantumCollapseManager:
             # Use deterministic collapse with seed
             collapsed_value = card.collapse(collapse_seed=collapse_seed)
             partner_collapsed_value = card.entangled_partner_value if collapsed_value == card.value else card.value
-        
+
         # Set collapse reason
         card.collapse_reason = 'player_declaration'
-        
+
         old_value = card.value
         event = CollapseEvent('manual', player_index, self.game.state['currentRound'])
         event.collapsed_cards.append((player_index, card_index, old_value, collapsed_value))
-        
+
         # Find and collapse the entangled partner in other players' hands
         for other_player in range(4):
             if other_player == player_index:
                 continue
-            
+
             partner_idx, partner_card = self.find_entangled_card_in_hand(
                 other_player,
                 card.value,
                 card.entangled_partner_value
             )
-            
+
             if partner_card:
                 old_partner_value = partner_card.value
                 # Partner must collapse to the opposite value (quantum entanglement)
@@ -100,7 +100,7 @@ class QuantumCollapseManager:
                 event.collapsed_cards.append((other_player, partner_idx, old_partner_value, partner_collapsed_value))
                 logger.info(f"Collapsed partner card: Player {other_player}, Card {partner_idx}: {old_partner_value} -> {partner_collapsed_value}")
                 break
-        
+
         self.collapse_history.append(event)
         return event
     
