@@ -99,35 +99,51 @@ class RoundHandler:
 
         if action in ['no_mus', 'cortar', 'paso', 'envido', 'ordago']:
             # End MUS phase immediately and move to GRANDE
+            betting_team = None
+            bet_amount = 0
+            bet_type = None
+            
             if action in ['envido', 'ordago']:
-                bet_amount = extra_data.get('amount', 2) if extra_data else 2
-                self.game.state['currentBet']['amount'] = bet_amount
-                self.game.state['currentBet']['betType'] = action
-                self.game.state['currentBet']['bettingTeam'] = self.game.get_player_team(player_index)
-                self.game.state['currentBet']['responses'] = {}
-                logger.info(f"Player {player_index} bet {bet_amount} points ({action})")
-            else:
-                self.game.state['currentBet'] = {
-                    'amount': 0,
-                    'bettingTeam': None,
-                    'betType': None,
-                    'responses': {}
-                }
+                bet_amount = 40 if action == 'ordago' else (extra_data.get('amount', 2) if extra_data else 2)
+                bet_type = action
+                betting_team = self.game.get_player_team(player_index)
+                logger.info(f"Player {player_index} bet {bet_amount} points ({action}) during MUS")
 
             self.game.state['musPhaseActive'] = False
             self.game.state['currentRound'] = 'GRANDE'
             self.game.state['roundActions'] = {}
             self.game.state['allPlayersPassed'] = False
             self.game.state['waitingForDiscard'] = False
-            self.game.state['activePlayerIndex'] = self.game.state['manoIndex']
 
             # Initialize Grande phase
             self.grande_handler.initialize_grande_phase()
+            
+            # If there was a bet during MUS, set it up in Grande phase
+            if betting_team:
+                phase = self.game.state['grandePhase']
+                phase['phaseState'] = 'BET_PLACED'
+                phase['attackingTeam'] = betting_team
+                phase['defendingTeam'] = self.game.get_opponent_team(betting_team)
+                phase['currentBetAmount'] = bet_amount
+                phase['betType'] = bet_type
+                phase['lastBettingTeam'] = betting_team
+                phase['defendersResponded'] = []
+                phase['allPassed'] = False
+                
+                # Find first defender (counterclockwise from betting player)
+                first_defender = self.grande_handler._get_next_defender_clockwise(player_index)
+                self.game.state['activePlayerIndex'] = first_defender
+                
+                logger.info(f"Grande phase starts with bet from MUS: {bet_amount} points, first defender is Player {first_defender}")
+            else:
+                # No bet - mano starts
+                self.game.state['activePlayerIndex'] = self.game.state['manoIndex']
 
             return {
                 'success': True,
                 'round_changed': True,
-                'new_round': 'GRANDE'
+                'new_round': 'GRANDE',
+                'bet_from_mus': betting_team is not None
             }
         
         return {'success': False, 'error': 'Invalid action'}
