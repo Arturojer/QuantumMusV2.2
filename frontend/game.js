@@ -3182,22 +3182,41 @@ function initGame() {
     // Count declarations per team
     // Treat 'tengo_after_penalty' as a TENGO for counting/eligibility purposes
     const isTengo = (val) => val === true || val === 'tengo_after_penalty';
-    const team1TengoCount = gameState.teams.team1.players.filter(p => isTengo(gameState.paresDeclarations[p])).length;
-    const team2TengoCount = gameState.teams.team2.players.filter(p => isTengo(gameState.paresDeclarations[p])).length;
-
-    const team1PuedeOrTengoCount = gameState.teams.team1.players.filter(p => 
-      isTengo(gameState.paresDeclarations[p]) || gameState.paresDeclarations[p] === 'puede'
-    ).length;
-    const team2PuedeOrTengoCount = gameState.teams.team2.players.filter(p => 
-      isTengo(gameState.paresDeclarations[p]) || gameState.paresDeclarations[p] === 'puede'
-    ).length;
+    const isPuede = (val) => val === 'puede';
+    const isNoTengo = (val) => val === false;
     
-    console.log(`PARES declarations - Team1 tengo: ${team1TengoCount}, puede/tengo: ${team1PuedeOrTengoCount}`);
-    console.log(`PARES declarations - Team2 tengo: ${team2TengoCount}, puede/tengo: ${team2PuedeOrTengoCount}`);
+    const team1Players = gameState.teams.team1.players;
+    const team2Players = gameState.teams.team2.players;
     
-    // Determine if betting should happen
-    const canBet = (team1TengoCount > 0 && team2PuedeOrTengoCount > 0) || 
-                   (team2TengoCount > 0 && team1PuedeOrTengoCount > 0);
+    // Count each type of declaration per team
+    const team1Tengo = team1Players.filter(p => isTengo(gameState.paresDeclarations[p])).length;
+    const team1Puede = team1Players.filter(p => isPuede(gameState.paresDeclarations[p])).length;
+    const team1NoTengo = team1Players.filter(p => isNoTengo(gameState.paresDeclarations[p])).length;
+    
+    const team2Tengo = team2Players.filter(p => isTengo(gameState.paresDeclarations[p])).length;
+    const team2Puede = team2Players.filter(p => isPuede(gameState.paresDeclarations[p])).length;
+    const team2NoTengo = team2Players.filter(p => isNoTengo(gameState.paresDeclarations[p])).length;
+    
+    console.log(`PARES declarations - Team1: ${team1Tengo} tengo, ${team1Puede} puede, ${team1NoTengo} no tengo`);
+    console.log(`PARES declarations - Team2: ${team2Tengo} tengo, ${team2Puede} puede, ${team2NoTengo} no tengo`);
+    
+    // Determine if betting should happen based on requirements:
+    // Betting is ONLY skipped if: 
+    // - 1-2 players from SAME team say "tengo"/"puede" 
+    // - AND both players from OTHER team say "no tengo"
+    const team1HasInterest = (team1Tengo + team1Puede >= 1);
+    const team2HasInterest = (team2Tengo + team2Puede >= 1);
+    const team1AllNoTengo = (team1NoTengo === 2);
+    const team2AllNoTengo = (team2NoTengo === 2);
+    
+    // Betting is skipped only if one team has interest and other team all said no
+    const shouldSkipBetting = (team1HasInterest && team2AllNoTengo) || 
+                              (team2HasInterest && team1AllNoTengo);
+    
+    // Betting happens if we shouldn't skip it
+    const canBet = !shouldSkipBetting;
+    
+    console.log(`PARES betting decision: team1HasInterest=${team1HasInterest}, team2HasInterest=${team2HasInterest}, team1AllNoTengo=${team1AllNoTengo}, team2AllNoTengo=${team2AllNoTengo}, shouldSkipBetting=${shouldSkipBetting}, canBet=${canBet}`);
 
     // Three possible outcomes after declaration:
     // 1) Betting possible -> start PARES betting
