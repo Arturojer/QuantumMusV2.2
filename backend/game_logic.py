@@ -920,19 +920,21 @@ class QuantumMusGame:
     def should_auto_declare(self, player_index, round_name):
         """
         Check if a player should auto-declare for PARES or JUEGO
-        Returns True if all cards are collapsed and outcome is certain
+        Returns True if outcome is certain (either no entangled cards, or entangled with certain outcome)
         """
         hand = self.hands.get(player_index, [])
         if not hand:
             return False
         
-        # Check if all cards are collapsed
-        all_collapsed = all(getattr(card, 'is_collapsed', False) for card in hand)
-        if not all_collapsed:
-            # Has entangled cards - check if outcome is certain
-            return self.get_auto_declaration_value(player_index, round_name) is not None
+        # Check if player has any entangled cards
+        has_entangled = any(getattr(card, 'is_entangled', False) and not getattr(card, 'is_collapsed', False) for card in hand)
         
-        return True
+        if not has_entangled:
+            # No uncollapsed entangled cards - can always auto-declare
+            return True
+        
+        # Has entangled cards - check if outcome is certain
+        return self.get_auto_declaration_value(player_index, round_name) is not None
     
     def get_auto_declaration_value(self, player_index, round_name):
         """
@@ -943,18 +945,18 @@ class QuantumMusGame:
         if not hand:
             return None
         
-        # Check if all cards are collapsed
-        all_collapsed = all(getattr(card, 'is_collapsed', False) for card in hand)
+        # Check if player has any uncollapsed entangled cards
+        has_uncollapsed_entangled = any(getattr(card, 'is_entangled', False) and not getattr(card, 'is_collapsed', False) for card in hand)
         
-        if all_collapsed:
-            # Simple case - all cards collapsed
+        if not has_uncollapsed_entangled:
+            # No uncollapsed entangled cards - simple case
             if round_name == 'PARES':
                 return self._has_pares(hand)
             elif round_name == 'JUEGO':
                 return self._has_juego(hand)
             return None
         
-        # Has entangled cards - check all possible combinations
+        # Has uncollapsed entangled cards - check all possible combinations
         if round_name == 'PARES':
             return self._check_certain_pares_outcome(hand)
         elif round_name == 'JUEGO':
@@ -1011,7 +1013,7 @@ class QuantumMusGame:
         Check if PARES outcome is certain despite having entangled cards
         Returns True (always has pares), False (never has pares), or None (uncertain)
         
-        Entanglement: K↔A and 2↔3 (mode 8) can swap values within same suit
+        Entanglement: A↔K and 2↔3 (mode 8) within same suit
         
         Value equivalence for PARES in mode 8:
         - A and 2 are equivalent (form pairs together)
@@ -1029,15 +1031,16 @@ class QuantumMusGame:
         collapsed_cards = []
         
         for card in hand:
+            is_entangled = getattr(card, 'is_entangled', False)
             is_collapsed = getattr(card, 'is_collapsed', False)
             card_value = getattr(card, 'value', '')
             
-            if is_collapsed:
-                # Card has collapsed to a definite value
+            if is_collapsed or not is_entangled:
+                # Card has collapsed or is not entangled - use its current value
                 collapsed_cards.append(card_value)
             else:
-                # Card is in superposition - determine possible values
-                # K↔A entanglement (always active)
+                # Card is entangled and uncollapsed - determine possible values
+                # A↔K entanglement (always active)
                 if card_value == 'K':
                     entangled_cards.append(['K', 'A'])
                 elif card_value == 'A':
@@ -1048,8 +1051,8 @@ class QuantumMusGame:
                 elif self.game_mode == '8' and card_value == '3':
                     entangled_cards.append(['3', '2'])
                 else:
-                    # Non-entangled card but not collapsed - shouldn't happen
-                    # but if it does, require manual declaration
+                    # Should not reach here - entangled but not A/K/2/3
+                    logger.warning(f"Card {card_value} marked as entangled but not A/K/2/3")
                     return None
         
         if not entangled_cards:
@@ -1102,7 +1105,7 @@ class QuantumMusGame:
         Check if JUEGO outcome is certain despite having entangled cards
         Returns True (always has juego), False (never has juego), or None (uncertain)
         
-        Entanglement: K↔A and 2↔3 (mode 8) can swap values within same suit
+        Entanglement: A↔K and 2↔3 (mode 8) within same suit
         """
         def get_card_points(val):
             if val == 'A':
@@ -1123,15 +1126,16 @@ class QuantumMusGame:
         collapsed_points = 0
         
         for card in hand:
+            is_entangled = getattr(card, 'is_entangled', False)
             is_collapsed = getattr(card, 'is_collapsed', False)
             card_value = getattr(card, 'value', '')
             
-            if is_collapsed:
-                # Card has collapsed to a definite value
+            if is_collapsed or not is_entangled:
+                # Card has collapsed or is not entangled - use its current value
                 collapsed_points += get_card_points(card_value)
             else:
-                # Card is in superposition - determine possible values
-                # K↔A entanglement (always active)
+                # Card is entangled and uncollapsed - determine possible values
+                # A↔K entanglement (always active)
                 if card_value == 'K':
                     entangled_cards.append(['K', 'A'])
                 elif card_value == 'A':
@@ -1142,8 +1146,8 @@ class QuantumMusGame:
                 elif self.game_mode == '8' and card_value == '3':
                     entangled_cards.append(['3', '2'])
                 else:
-                    # Non-entangled card but not collapsed - shouldn't happen
-                    # but if it does, require manual declaration
+                    # Should not reach here - entangled but not A/K/2/3
+                    logger.warning(f"Card {card_value} marked as entangled but not A/K/2/3")
                     return None
         
         if not entangled_cards:

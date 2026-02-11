@@ -35,55 +35,47 @@ class QuantumCard:
         self._determine_quantum_state()
     
     def _determine_quantum_state(self):
-        """Determine if card has quantum properties based on game mode and suit pairings"""
+        """Determine if card has quantum properties based on game mode
+        
+        Entanglement rules (same suit only):
+        - A ↔ K (always, in both 4 and 8 reyes modes)
+        - K ↔ A (always, in both 4 and 8 reyes modes)
+        - 2 ↔ 3 (only in 8 reyes mode)
+        - 3 ↔ 2 (only in 8 reyes mode)
+        """
         is_8_reyes = self.game_mode == '8'
         
-        # ===== REYES (K) - Always entangled in both modes =====
-        # Team 1: Rey de Oros ↔ Rey de Copas
-        # Team 2: Rey de Espadas ↔ Rey de Bastos
+        # ===== REYES (K) ↔ ASES (A) - Always entangled in both modes =====
+        # K can collapse to A, A can collapse to K (same suit)
         if self.value == 'K':
             self.is_entangled = True
             self.coefficient_a = 0.7071  # sqrt(2)/2
             self.coefficient_b = 0.7071
-            
-            if self.suit in ['oros', 'copas']:
-                # Team 1 pairing
-                self.entangled_partner_value = 'K'
-                self.entangled_partner_suit = 'copas' if self.suit == 'oros' else 'oros'
-            else:  # espadas, bastos
-                # Team 2 pairing
-                self.entangled_partner_value = 'K'
-                self.entangled_partner_suit = 'bastos' if self.suit == 'espadas' else 'espadas'
+            self.entangled_partner_value = 'A'
+            self.entangled_partner_suit = self.suit  # Same suit
         
-        # ===== TRESES (3) - Entangled in 8 Kings mode only =====
+        elif self.value == 'A':
+            self.is_entangled = True
+            self.coefficient_a = 0.7071
+            self.coefficient_b = 0.7071
+            self.entangled_partner_value = 'K'
+            self.entangled_partner_suit = self.suit  # Same suit
+        
+        # ===== TRESES (3) ↔ DOSES (2) - Entangled in 8 Kings mode only =====
+        # 3 can collapse to 2, 2 can collapse to 3 (same suit)
         elif is_8_reyes and self.value == '3':
             self.is_entangled = True
             self.coefficient_a = 0.7071
             self.coefficient_b = 0.7071
-            
-            if self.suit in ['oros', 'copas']:
-                # Team 1 pairing
-                self.entangled_partner_value = '3'
-                self.entangled_partner_suit = 'copas' if self.suit == 'oros' else 'oros'
-            else:  # espadas, bastos
-                # Team 2 pairing
-                self.entangled_partner_value = '3'
-                self.entangled_partner_suit = 'bastos' if self.suit == 'espadas' else 'espadas'
+            self.entangled_partner_value = '2'
+            self.entangled_partner_suit = self.suit  # Same suit
         
-        # ===== DOSES (2) - Entangled in 8 Kings mode only =====
         elif is_8_reyes and self.value == '2':
             self.is_entangled = True
             self.coefficient_a = 0.7071
             self.coefficient_b = 0.7071
-            
-            if self.suit in ['oros', 'copas']:
-                # Team 1 pairing
-                self.entangled_partner_value = '2'
-                self.entangled_partner_suit = 'copas' if self.suit == 'oros' else 'oros'
-            else:  # espadas, bastos
-                # Team 2 pairing
-                self.entangled_partner_value = '2'
-                self.entangled_partner_suit = 'bastos' if self.suit == 'espadas' else 'espadas'
+            self.entangled_partner_value = '3'
+            self.entangled_partner_suit = self.suit  # Same suit
         
         # Other cards can be in superposition unless entangled
         qrng = get_quantum_rng()

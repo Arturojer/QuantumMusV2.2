@@ -174,9 +174,11 @@ def _check_and_emit_auto_declaration(room_id, game, round_name):
     
     declarations = game.state[key]
     
-    # If all players have declared, check if we need to transition to PUNTO or start betting
+    # If all players have declared, check if we need to transition or start betting
     if len(declarations) >= 4:
-        if current_round == 'JUEGO':
+        if current_round == 'PARES':
+            _handle_pares_declarations_complete(room_id, game)
+        elif current_round == 'JUEGO':
             _handle_juego_declarations_complete(room_id, game)
         return False
     
@@ -237,6 +239,115 @@ def _check_and_emit_auto_declaration(room_id, game, round_name):
             eventlet.sleep(2.0) if eventlet else None
     
     return auto_declared_count > 0
+
+
+def _handle_pares_declarations_complete(room_id, game):
+    """
+    Handle completion of all PARES declarations.
+    Determine if we should start PARES betting or transition to JUEGO.
+    Implements the same logic as frontend's handleAllParesDeclarationsDone().
+    """
+    declarations = game.state.get('paresDeclarations', {})
+    if len(declarations) < 4:
+        return  # Not all declarations complete yet
+    
+    # Mark declaration phase as complete and reset active player to mano
+    game.complete_declaration_phase()
+    game.set_phase('VALIDATION')
+    
+    # Helper functions to check declaration types
+    def is_tengo(val):
+        return val in [True, 'tengo_after_penalty']
+    
+    def is_puede(val):
+        return val == 'puede'
+    
+    def is_no_tengo(val):
+        return val == False
+    
+    # Count declarations per team
+    team1_players = game.state['teams']['team1']['players']
+    team2_players = game.state['teams']['team2']['players']
+    
+    team1_tengo = sum(1 for p in team1_players if is_tengo(declarations.get(p)))
+    team1_puede = sum(1 for p in team1_players if is_puede(declarations.get(p)))
+    team1_no_tengo = sum(1 for p in team1_players if is_no_tengo(declarations.get(p)))
+    
+    team2_tengo = sum(1 for p in team2_players if is_tengo(declarations.get(p)))
+    team2_puede = sum(1 for p in team2_players if is_puede(declarations.get(p)))
+    team2_no_tengo = sum(1 for p in team2_players if is_no_tengo(declarations.get(p)))
+    
+    logger.info(f"PARES declarations complete - Team1: {team1_tengo} tengo, {team1_puede} puede, {team1_no_tengo} no tengo | Team2: {team2_tengo} tengo, {team2_puede} puede, {team2_no_tengo} no tengo")
+    
+    # Determine if betting should happen
+    # Betting is ONLY skipped if:
+    # - 1-2 players from SAME team say "tengo"/"puede"
+    # - AND both players from OTHER team say "no tengo"
+    team1_has_interest = (team1_tengo + team1_puede >= 1)
+    team2_has_interest = (team2_tengo + team2_puede >= 1)
+    team1_all_no_tengo = (team1_no_tengo == 2)
+    team2_all_no_tengo = (team2_no_tengo == 2)
+    
+    # Betting is skipped only if one team has interest and other team all said no
+    should_skip_betting = (team1_has_interest and team2_all_no_tengo) or (team2_has_interest and team1_all_no_tengo)
+    
+    # Betting happens if we shouldn't skip it
+    can_bet = not should_skip_betting
+    
+    logger.info(f"PARES betting decision: team1HasInterest={team1_has_interest}, team2HasInterest={team2_has_interest}, team1AllNoTengo={team1_all_no_tengo}, team2AllNoTengo={team2_all_no_tengo}, shouldSkipBetting={should_skip_betting}, canBet={can_bet}")
+    
+    if can_bet:
+        # Start PARES betting (only TENGO and PUEDE players can bet)
+        logger.info('Starting PARES betting - both teams can compete')
+        
+        # Set betting phase
+        game.state['paresPhase'] = 'betting'
+        game.set_phase('BETTING')
+        
+        # Reset bet state for betting phase
+        game.state['currentBet'] = {
+            'amount': 0,
+            'previousAmount': 0,
+            'bettingTeam': None,
+            'betType': None,
+            'isRaise': False,
+            'responses': {}
+        }
+        
+        # Active player already set to manoIndex by complete_declaration_phase()
+        # Broadcast betting phase started
+        socketio.emit('betting_phase_started', {
+            'round': 'PARES',
+            'active_player': game.state['manoIndex'],
+            'game_state': game.get_public_state(),
+            'declarations': declarations
+        }, room=room_id)
+        
+        logger.info(f"PARES betting started with Player {game.state['manoIndex']}")
+    else:
+        # Skip betting and proceed to JUEGO declaration phase
+        logger.info('Skipping PARES betting - proceeding to JUEGO declaration phase')
+        
+        # Clear PARES declaration state
+        game.state['paresDeclarations'] = {}
+        game.state['currentRound'] = 'JUEGO'
+        game.state['juegoDeclarations'] = {}
+        game.set_phase('DECLARATION')
+        
+        # Reset bet state
+        game.reset_round_state()
+        
+        # Active player already set to manoIndex by complete_declaration_phase()
+        # Broadcast round transition
+        socketio.emit('round_transition', {
+            'round': 'JUEGO',
+            'reason': 'pares_complete_no_betting',
+            'active_player': game.state['manoIndex'],
+            'game_state': game.get_public_state()
+        }, room=room_id)
+        
+        # Check for auto-declarations in JUEGO
+        _check_and_emit_auto_declaration(room_id, game, 'JUEGO')
 
 
 def _handle_juego_declarations_complete(room_id, game):
@@ -1081,14 +1192,15 @@ def handle_player_declaration(data):
     if len(game.state[key]) >= 4:
         # All declarations complete - handle transition
         if round_name == 'PARES':
-            # For PARES, mark declaration complete and transition to betting or next round
-            game.complete_declaration_phase()
-            # TODO: Add PARES-specific transition logic if needed
-        # Note: JUEGO completion is handled by _handle_juego_declarations_complete called below
-    
-    # After declaration, check if next player can auto-declare
-    if advance_turn and len(game.state[key]) < 4:
-        _check_and_emit_auto_declaration(room_id, game, round_name)
+            # For PARES, call dedicated handler to determine betting or transition
+            _handle_pares_declarations_complete(room_id, game)
+        elif round_name == 'JUEGO':
+            # For JUEGO, call dedicated handler  
+            _handle_juego_declarations_complete(room_id, game)
+    else:
+        # Not all declarations complete yet - check if next player can auto-declare
+        if advance_turn and len(game.state[key]) < 4:
+            _check_and_emit_auto_declaration(room_id, game, round_name)
 
 
 @socketio.on('trigger_declaration_collapse')

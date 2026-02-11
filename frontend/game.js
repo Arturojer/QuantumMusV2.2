@@ -1156,13 +1156,9 @@ function initGame() {
         const allDeclared = Object.keys(gameState[key]).length === 4;
         
         if (allDeclared) {
-          // All players declared - transition to betting or next round
-          console.log(`[ONLINE] All players declared in ${roundName}, transitioning to betting/next round`);
-          if (roundName === 'PARES') {
-            handleAllParesDeclarationsDone();
-          } else if (roundName === 'JUEGO') {
-            handleAllJuegoDeclarationsDone();
-          }
+          // All players declared - DON'T call handlers, wait for server events
+          console.log(`[ONLINE] All players declared in ${roundName}, waiting for server transition`);
+          // Server will send either 'betting_phase_started' or 'round_transition' event
         } else if (data.next_player !== null && data.next_player !== undefined) {
           // More declarations needed - update active player
           const nextLocalIdx = serverToLocal(data.next_player);
@@ -1170,8 +1166,12 @@ function initGame() {
           
           console.log(`[ONLINE] Continuing ${roundName} declarations, next player: ${nextLocalIdx + 1}`);
           
-          // Start timer for next player (server will auto-declare if possible)
-          startPlayerTurnTimer(nextLocalIdx);
+          // Only start timer if it's the local player's turn to declare
+          if (nextLocalIdx === 0) {
+            startPlayerTurnTimer(nextLocalIdx);
+          }
+          
+          updateScoreboard();
         }
         
         // For manual 'tengo' or 'no tengo', wait for 'cards_collapsed' event
@@ -1379,10 +1379,24 @@ function initGame() {
         applyServerSnapshot(data);
       }
       
-      // If transitioning to PUNTO, call startPuntoBetting
+      // Handle round-specific transitions
       if (data.round === 'PUNTO') {
         console.log('[ONLINE] Starting PUNTO betting phase');
         startPuntoBetting();
+      } else if (data.round === 'JUEGO') {
+        console.log('[ONLINE] Transitioning to JUEGO declaration phase');
+        gameState.juegoDeclarations = {};
+        showDeclarationBanner('JUEGO', () => {
+          console.log('[ONLINE] JUEGO declaration banner dismissed, waiting for server declarations');
+          updateScoreboard();
+        });
+      } else if (data.round === 'PARES') {
+        console.log('[ONLINE] Transitioning to PARES declaration phase');
+        gameState.paresDeclarations = {};
+        showDeclarationBanner('PARES', () => {
+          console.log('[ONLINE] PARES declaration banner dismissed, waiting for server declarations');
+          updateScoreboard();
+        });
       }
       
       updateRoundDisplay();
@@ -2827,13 +2841,28 @@ function initGame() {
 
     updateRoundDisplay();
 
+    // Check if we're in online mode
+    const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
+
     // For PARES and JUEGO, start declaration phase (mano declares first)
     if (gameState.currentRound === 'PARES') {
-      startParesDeclaration();
+      if (isOnlineGame) {
+        // In online mode, server handles declarations - just wait for events
+        console.log('[ONLINE] PARES round started, waiting for server declarations');
+        updateScoreboard();
+      } else {
+        startParesDeclaration();
+      }
     } else if (gameState.currentRound === 'JUEGO') {
       // Ensure declarations map is reset but preserve any preJuegoDeclarations
       gameState.juegoDeclarations = {};
-      startJuegoDeclaration();
+      if (isOnlineGame) {
+        // In online mode, server handles declarations - just wait for events
+        console.log('[ONLINE] JUEGO round started, waiting for server declarations');
+        updateScoreboard();
+      } else {
+        startJuegoDeclaration();
+      }
     } else {
       // For GRANDE and CHICA, start betting from mano
       updateScoreboard(); // Update buttons for betting rounds
@@ -3175,6 +3204,14 @@ function initGame() {
   }
   
   function proceedWithParesDeclaration() {
+      // Check if we're in online mode - server handles auto-declarations
+      const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
+      if (isOnlineGame) {
+        console.log('[ONLINE] proceedWithParesDeclaration called in online mode - server handles declarations');
+        updateScoreboard();
+        return;
+      }
+
       // Process declarations for all players in order starting from current active player
       // Prevent repeated declaration after transition
       if (proceedWithParesDeclaration._locked) return;
@@ -3762,6 +3799,14 @@ function initGame() {
   window.debugForceAllNoJuego = debugForceAllNoJuego;
   
   function proceedWithJuegoDeclaration() {
+    // Check if we're in online mode - server handles auto-declarations
+    const isOnlineGame = !!(window.onlineMode && window.QuantumMusSocket && window.QuantumMusOnlineRoom);
+    if (isOnlineGame) {
+      console.log('[ONLINE] proceedWithJuegoDeclaration called in online mode - server handles declarations');
+      updateScoreboard();
+      return;
+    }
+
     // Ensure tunneling is applied at the start of the JUEGO declaration phase
     if (!proceedWithJuegoDeclaration._tunnelApplied) {
       try {
@@ -6929,8 +6974,10 @@ function initGame() {
       // not all 4 players have declared yet.
       const paresDeclaredCount = gameState.paresDeclarations ? Object.keys(gameState.paresDeclarations).length : 0;
       const juegoDeclaredCount = gameState.juegoDeclarations ? Object.keys(gameState.juegoDeclarations).length : 0;
-      const inParesDeclaration = gameState.currentRound === 'PARES' && paresDeclaredCount < 4;
-      const inJuegoDeclaration = gameState.currentRound === 'JUEGO' && juegoDeclaredCount < 4;
+      const localPlayerDeclaredPares = gameState.paresDeclarations && gameState.paresDeclarations.hasOwnProperty(0);
+      const localPlayerDeclaredJuego = gameState.juegoDeclarations && gameState.juegoDeclarations.hasOwnProperty(0);
+      const inParesDeclaration = gameState.currentRound === 'PARES' && paresDeclaredCount < 4 && !localPlayerDeclaredPares;
+      const inJuegoDeclaration = gameState.currentRound === 'JUEGO' && juegoDeclaredCount < 4 && !localPlayerDeclaredJuego;
       
       // Check if there's an active bet
       const hasActiveBet = gameState.currentBet && gameState.currentBet.bettingTeam;
@@ -6966,11 +7013,16 @@ function initGame() {
         acceptButton.style.display = 'none'; // Hide ACCEPT during declaration
         buttons[4].style.display = 'none'; // Hide ÓRDAGO during declaration
         
-        // Ensure buttons are enabled if it's local player's turn
+        // Enable buttons ONLY if it's the local player's turn
         if (gameState.activePlayerIndex === 0) {
           musButton.disabled = false;
           buttons[1].disabled = false;
           buttons[2].disabled = false;
+        } else {
+          // Disable buttons when it's not local player's turn
+          musButton.disabled = true;
+          buttons[1].disabled = true;
+          buttons[2].disabled = true;
         }
       } else if (inJuegoDeclaration) {
         // In JUEGO declaration phase - show TENGO, NO TENGO, PUEDE only
@@ -6983,11 +7035,16 @@ function initGame() {
         acceptButton.style.display = 'none'; // Hide ACCEPT during declaration
         buttons[4].style.display = 'none'; // Hide ÓRDAGO during declaration
         
-        // Ensure buttons are enabled if it's local player's turn
+        // Enable buttons ONLY if it's the local player's turn
         if (gameState.activePlayerIndex === 0) {
           musButton.disabled = false;
           buttons[1].disabled = false;
           buttons[2].disabled = false;
+        } else {
+          // Disable buttons when it's not local player's turn
+          musButton.disabled = true;
+          buttons[1].disabled = true;
+          buttons[2].disabled = true;
         }
       } else if (hasActiveBet && isOpponentsBet) {
         // There's an active bet from the OPPONENT team - show response buttons only
